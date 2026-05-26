@@ -214,17 +214,38 @@ class MainActivity : ComponentActivity() {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "ACTIVE SESSION LOG",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFFDFB239)
-                )
-                Text(
-                    text = "${events.size} Chests Found",
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.6f)
-                )
+                Column {
+                    Text(
+                        text = "ACTIVE SESSION LOG",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFDFB239)
+                    )
+                    Text(
+                        text = "${events.size} Chests Found",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.6f)
+                    )
+                }
+                
+                Button(
+                    onClick = {
+                        scope.launch {
+                            try {
+                                val api = com.totalbattle.chestscanner.network.ApiService.create()
+                                com.totalbattle.chestscanner.network.SyncManager.syncEvents(context, api)
+                                android.widget.Toast.makeText(context, "Sync Triggered", android.widget.Toast.LENGTH_SHORT).show()
+                            } catch(e: Exception) {
+                                android.widget.Toast.makeText(context, "Sync Error", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDFB239)),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Text("Sync", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))

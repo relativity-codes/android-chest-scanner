@@ -17,10 +17,11 @@ object SyncManager {
             Log.d(TAG, "Starting Event Sync to Cloud API...")
             
             val db = AppDatabase.getDatabase(context)
-            val events = db.chestEventDao().getUnsyncedEvents()
+            val events = db.chestEventDao().getUnsyncedEvents(false)
             
             if (events.isEmpty()) {
                 Log.d(TAG, "No events to sync.")
+                com.totalbattle.chestscanner.util.ErrorLogger.logError(TAG, "ℹ️ Sync Skipped: No new unsynced chests.", null)
                 return@withContext true
             }
 
@@ -59,6 +60,7 @@ object SyncManager {
             db.chestEventDao().markAsSynced(events.map { it.id })
 
             Log.d(TAG, "✅ Synced ${events.size} events successfully!")
+            ErrorLogger.logError(TAG, "✅ API Request Successful. Uploaded ${events.size} chests.", null)
             true
         } catch (e: retrofit2.HttpException) {
             val errorBody = e.response()?.errorBody()?.string()
