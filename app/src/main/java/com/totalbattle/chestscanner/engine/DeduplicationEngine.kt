@@ -13,18 +13,27 @@ class DeduplicationEngine {
     // if the user scrolls up and down
     private val sessionCache = mutableSetOf<String>()
 
-    fun isDuplicate(chestType: String, playerName: String, normalizedY: Float): Boolean {
+    fun isDuplicate(
+        chestName: String,
+        fromPlayer: String,
+        source: String,
+        time: String,
+        gameDay: String,
+        normalizedY: Float
+    ): Boolean {
         val now = System.currentTimeMillis()
         
         // Clean up old entries in short-term cache
         shortTermCache.entries.removeIf { now - it.value > SHORT_TERM_WINDOW_MS }
         
-        // Spatial hash bucket (approx 10 buckets per screen)
-        // Groups coordinates into ~10% screen height chunks.
+        // iconPositionBucket helps distinguish identical chests on the SAME frame
         val iconPositionBucket = (normalizedY * 10).roundToInt()
         
-        val globalHash = hash("$playerName:$chestType:$iconPositionBucket")
-        val shortTermHash = hash("$playerName:$chestType")
+        // Global hash uses all the specified fields to prevent double counting
+        val globalHash = hash("$chestName:$fromPlayer:$source:$time:$gameDay")
+        
+        // Short term hash uses position to avoid double counting same chest during scroll
+        val shortTermHash = hash("$chestName:$fromPlayer:$source:$time:$gameDay:$iconPositionBucket")
         
         if (sessionCache.contains(globalHash)) {
             return true

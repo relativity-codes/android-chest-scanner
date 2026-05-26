@@ -29,16 +29,45 @@ class OcrEngine {
     private val playerRegex = Regex("(?i)From:\\s*(.*)")
     private val timerRegex = Regex("(?i)(\\d{1,2})h\\s*(\\d{1,2})m")
     
-    // OCR Debounce layer (Map of region normalizedY string -> timestamp)
+    // Tab Detection Regex
+    private val giftsTabRegex = Regex("(?i)Gifts")
+    private val triumphalTabRegex = Regex("(?i)Triumphal")
+
     private val lastOcrTimes = mutableMapOf<String, Long>()
+
+    suspend fun detectTab(bitmap: Bitmap): String {
+        // Crop the header area where tabs are (roughly 18% to 25% of screen height)
+        val headerHeight = (bitmap.height * 0.08).toInt()
+        val headerTop = (bitmap.height * 0.17).toInt()
+        val headerRect = Rect(0, headerTop, bitmap.width, headerTop + headerHeight)
+        
+        val headerBitmap = Bitmap.createBitmap(bitmap, headerRect.left, headerRect.top, headerRect.width(), headerRect.height())
+        val textBlocks = runMlKitOcr(headerBitmap)
+        headerBitmap.recycle()
+
+        var hasGifts = false
+        var hasTriumphal = false
+
+        for (block in textBlocks) {
+            val text = block.text
+            if (giftsTabRegex.containsMatchIn(text)) hasGifts = true
+            if (triumphalTabRegex.containsMatchIn(text)) hasTriumphal = true
+        }
+
+        return when {
+            hasTriumphal -> "Triumphal Gifts"
+            hasGifts -> "Gifts"
+            else -> "Unknown"
+        }
+    }
 
     suspend fun process(bitmap: Bitmap, normalizedY: Float): OcrResult? {
         val regionKey = String.format("%.2f", normalizedY)
         val now = System.currentTimeMillis()
         val lastTime = lastOcrTimes[regionKey] ?: 0L
         
-        // OCR Debounce Window = 500ms per region
-        if (now - lastTime < 500) {
+        // OCR Debounce Window = 200ms per region (Faster than human reaction)
+        if (now - lastTime < 200) {
             return null // Skip OCR
         }
         lastOcrTimes[regionKey] = now

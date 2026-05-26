@@ -70,20 +70,15 @@ class RowExtractor {
             
             // Map normalized coordinates back to absolute
             val absoluteY = (anchor.normalizedY * fullScreen.height).toInt()
+            val rowHeight = (fullScreen.height * 0.145f).toInt()
             
-            val rowHeight = (fullScreen.height * 0.12f).toInt()
+            // Allow more flexible visibility for scrolling (40% instead of 60%)
+            val visibleTop = maxOf(0, absoluteY)
+            val visibleBottom = minOf(fullScreen.height, absoluteY + rowHeight)
+            val visibleHeight = visibleBottom - visibleTop
             
-            // Visibility Threshold Rule:
-            // Ignore row if visible_height < 60% OR entire icon isn't visible.
-            if (absoluteY < 0 || absoluteY + rowHeight > fullScreen.height) {
-                // If it's clipped, check if at least 60% is visible
-                val visibleTop = maxOf(0, absoluteY)
-                val visibleBottom = minOf(fullScreen.height, absoluteY + rowHeight)
-                val visibleHeight = visibleBottom - visibleTop
-                
-                if (visibleHeight.toFloat() / rowHeight < 0.60f) {
-                    continue // discard
-                }
+            if (visibleHeight.toFloat() / rowHeight < 0.40f) {
+                continue 
             }
             
             val rowRect = Rect(0, maxOf(0, absoluteY), fullScreen.width, minOf(fullScreen.height, absoluteY + rowHeight))
@@ -95,19 +90,20 @@ class RowExtractor {
     }
     
     private fun detectAnchors(fullScreen: Bitmap): List<NormalizedAnchor> {
-        // In a real OpenCV app, we use matchTemplate.
-        // For scaffold, we mock generating anchors in the safe area.
-        val safeTopNorm = 0.15f
-        val safeBottomNorm = 0.85f
-        val listHeightNorm = safeBottomNorm - safeTopNorm
+        // Updated to match Total Battle "Gift Chests" layout:
+        // Banner + Tabs take up the top ~23%
+        // Bottom buttons take up the last ~7%
+        val safeTopNorm = 0.23f 
+        val safeBottomNorm = 0.93f
         
-        val estimatedRowHeightNorm = 0.12f
+        // Each chest row is approx 14.5% of the screen height
+        val estimatedRowHeightNorm = 0.145f
         val anchors = mutableListOf<NormalizedAnchor>()
         
         var currentYNorm = safeTopNorm
-        while (currentYNorm + estimatedRowHeightNorm <= safeBottomNorm) {
-            // Mocking a perfect confidence anchor
-            anchors.add(NormalizedAnchor(0.05f, currentYNorm, 0.90f))
+        // We'll generate up to 5 potential row starts
+        while (currentYNorm + (estimatedRowHeightNorm * 0.8f) <= safeBottomNorm) {
+            anchors.add(NormalizedAnchor(0.05f, currentYNorm, 0.95f))
             currentYNorm += estimatedRowHeightNorm
         }
         
@@ -119,7 +115,15 @@ class RowExtractor {
         val top = rect.top.coerceIn(0, src.height - 1)
         val width = rect.width().coerceIn(1, src.width - left)
         val height = rect.height().coerceIn(1, src.height - top)
-        return Bitmap.createBitmap(src, left, top, width, height)
+        
+        // Create the subset bitmap
+        val subset = Bitmap.createBitmap(src, left, top, width, height)
+        // Force a deep copy to ensure it's independent of the source bitmap's lifecycle
+        val copy = subset.copy(subset.config ?: Bitmap.Config.ARGB_8888, false)
+        if (subset != src) {
+            subset.recycle()
+        }
+        return copy
     }
     
     fun reset() {

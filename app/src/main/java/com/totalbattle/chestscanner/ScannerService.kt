@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.*
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -41,6 +42,7 @@ class ScannerService : Service() {
     private var floatingControlView: View? = null
     private var btnScan: Button? = null
     private var txtStatus: android.widget.TextView? = null
+    private var txtError: android.widget.TextView? = null
     
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private var syncJob: Job? = null
@@ -69,6 +71,12 @@ class ScannerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        
+        if (!org.opencv.android.OpenCVLoader.initDebug()) {
+            Log.e(TAG, "OpenCV initialization failed!")
+            showError("OpenCV Init Failed")
+        }
+
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         projectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         createNotificationChannel()
@@ -86,26 +94,49 @@ class ScannerService : Service() {
         startOcrConsumer()
     }
 
+    private var currentTab = "Gifts"
+
     private fun startOcrConsumer() {
         scope.launch(Dispatchers.Default) {
             for (bitmap in ocrQueue) {
-                // Perform extraction and OCR
-                val rows = rowExtractor.extract(bitmap)
-                for (row in rows) {
-                    val ocrResult = ocrEngine.process(row.bitmap, row.normalizedY)
-                    if (ocrResult != null && ocrResult.isValid) {
-                        eventProcessor.process(ocrResult, row.normalizedY, frameIndex)
+                try {
+                    // Parallelize row extraction and OCR for max speed
+                    val rows = rowExtractor.extract(bitmap)
+                    coroutineScope {
+                        rows.forEach { row ->
+                            launch {
+                                try {
+                                    val ocrResult = ocrEngine.process(row.bitmap, row.normalizedY)
+                                    if (ocrResult != null && ocrResult.isValid) {
+                                        eventProcessor.process(ocrResult, row.normalizedY, frameIndex, currentTab)
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Row processing error", e)
+                                    showError("Row Err: ${e.localizedMessage}")
+                                } finally {
+                                    row.bitmap.recycle()
+                                }
+                            }
+                        }
                     }
-                    row.bitmap.recycle()
+                } catch (e: Exception) {
+                    Log.e(TAG, "OCR Consumer loop error", e)
+                    showError("OCR Loop Err: ${e.localizedMessage}")
+                } finally {
+                    bitmap.recycle()
                 }
-                bitmap.recycle()
             }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val resultCode = intent?.getIntExtra("resultCode", Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
-        val data = intent?.getParcelableExtra<Intent>("data")
+        val data = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent?.getParcelableExtra("data", Intent::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent?.getParcelableExtra<Intent>("data")
+        }
 
         if (resultCode == Activity.RESULT_OK && data != null) {
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -114,7 +145,11 @@ class ScannerService : Service() {
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
                 .build()
             
-            startForeground(NOTIFICATION_ID, notification)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
             
             mediaProjection = projectionManager.getMediaProjection(resultCode, data)
             setupScreenCapture()
@@ -140,7 +175,13 @@ class ScannerService : Service() {
         )
     }
 
+    private var indicatorView: android.view.View? = null
+    private var isIndicatorVisible = true
+
     private fun showFloatingControl() {
+        if (floatingControlView != null) return 
+
+        val density = resources.displayMetrics.density
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -150,41 +191,118 @@ class ScannerService : Service() {
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = 10
-            y = 250 // Positioned for visibility below status bar
+            y = 300
         }
 
         val container = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#F2000000")) // Almost solid black for contrast
-            setPadding(20, 20, 20, 20)
+            setBackgroundColor(Color.parseColor("#33000000")) // 20% alpha black
+            setPadding((4 * density).toInt(), (4 * density).toInt(), (4 * density).toInt(), (4 * density).toInt())
+            minimumWidth = (140 * density).toInt()
         }
+
+        // Dedicated drag handle at the top
+        val dragHandle = android.widget.TextView(this).apply {
+            text = ":::: DRAG HERE ::::"
+            setTextColor(Color.parseColor("#88FFFFFF"))
+            textSize = 6f
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#11FFFFFF"))
+            setPadding(0, (2 * density).toInt(), 0, (2 * density).toInt())
+        }
+
+        val actionRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        val recLabel = android.widget.TextView(this).apply {
+            text = "REC"
+            setTextColor(Color.RED)
+            textSize = 8f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 0, (4 * density).toInt(), 0)
+        }
+
+        indicatorView = android.view.View(this).apply {
+            val size = (10 * density).toInt()
+            layoutParams = android.widget.LinearLayout.LayoutParams(size, size).apply {
+                marginEnd = (8 * density).toInt()
+            }
+            val shape = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(Color.RED)
+            }
+            background = shape
+        }
+
+        actionRow.addView(recLabel)
+        actionRow.addView(indicatorView)
 
         btnScan = Button(this).apply {
-            text = "▶ START SCAN"
-            setBackgroundColor(Color.parseColor("#DFB239")) // Gold
-            setTextColor(Color.BLACK)
-            setPadding(40, 25, 40, 25)
-            textSize = 15f
-            setTypeface(null, Typeface.BOLD)
+            text = "START SCAN"
+            textSize = 8f
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                (80 * density).toInt(),
+                (32 * density).toInt()
+            )
+            setBackgroundColor(Color.parseColor("#4DDFB239"))
         }
+        actionRow.addView(btnScan)
 
         txtStatus = android.widget.TextView(this).apply {
-            text = "Ready to Scan"
-            setTextColor(Color.WHITE)
-            textSize = 13f
-            setPadding(10, 20, 10, 10)
+            text = "READY TO SCAN"
+            setTextColor(Color.parseColor("#CCFFFFFF"))
+            textSize = 7f
+            setPadding((4 * density).toInt(), (2 * density).toInt(), (4 * density).toInt(), (2 * density).toInt())
+            maxWidth = (180 * density).toInt()
+        }
+
+        txtError = android.widget.TextView(this).apply {
+            text = ""
+            setTextColor(Color.parseColor("#AAFF5252"))
+            textSize = 6f
             visibility = View.GONE
-            setLineSpacing(0f, 1.3f)
         }
         
-        container.addView(btnScan)
+        container.addView(dragHandle)
+        container.addView(actionRow)
         container.addView(txtStatus)
+        container.addView(txtError)
         floatingControlView = container
+
+        // ONLY the handle moves the overlay
+        dragHandle.setOnTouchListener(object : View.OnTouchListener {
+            private var initialX = 0
+            private var initialY = 0
+            private var initialTouchX = 0f
+            private var initialTouchY = 0f
+
+            override fun onTouch(v: View, event: MotionEvent): Boolean {
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialX = params.x
+                        initialY = params.y
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        return true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        params.x = (initialX + (event.rawX - initialTouchX)).toInt()
+                        params.y = (initialY + (event.rawY - initialTouchY)).toInt()
+                        try { windowManager.updateViewLayout(floatingControlView, params) } catch (e: Exception) {}
+                        return true
+                    }
+                }
+                return false
+            }
+        })
         
         try {
             windowManager.addView(floatingControlView, params)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to add overlay", e)
+            floatingControlView = null
         }
 
         btnScan?.setOnClickListener {
@@ -192,13 +310,32 @@ class ScannerService : Service() {
         }
     }
 
-    private fun toggleScanning() {
-        if (currentState == ScannerState.STOPPED) {
-            startScanning()
-        } else {
-            stopScanning()
+    private fun showError(message: String) {
+        scope.launch(Dispatchers.Main) {
+            txtError?.text = "ERR: $message"
+            txtError?.visibility = View.VISIBLE
+            // Log for logcat as well
+            Log.e(TAG, "Overlay Error: $message")
         }
     }
+
+    private fun toggleScanning() {
+        try {
+            if (currentState == ScannerState.STOPPED) {
+                startScanning()
+            } else {
+                stopScanning()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Toggle Scanning Failed", e)
+            showError("Start Failed: ${e.message}")
+        }
+    }
+
+    private var blinkJob: Job? = null
+
+    private var heartbeatJob: Job? = null
+    private var heartbeatFrame = 0
 
     private fun startScanning() {
         currentState = ScannerState.INITIALIZING
@@ -206,6 +343,37 @@ class ScannerService : Service() {
         deduplicationEngine.clearSession()
         updateButtonUI()
         
+        // Start Pulsing Indicator (REC + Red Dot)
+        blinkJob = scope.launch {
+            indicatorView?.visibility = View.VISIBLE
+            while (isActive) {
+                val alpha = if (isIndicatorVisible) 1.0f else 0.1f
+                indicatorView?.alpha = alpha
+                // Pulse the REC label as well
+                (indicatorView?.parent as? android.view.ViewGroup)?.getChildAt(0)?.alpha = alpha
+                isIndicatorVisible = !isIndicatorVisible
+                delay(600)
+            }
+        }
+
+        // Heartbeat for status text to show it's "working"
+        heartbeatJob = scope.launch {
+            while (isActive) {
+                if (currentState != ScannerState.STOPPED) {
+                    val dots = ".".repeat(heartbeatFrame % 4).padEnd(3, ' ')
+                    withContext(Dispatchers.Main) {
+                        if (scannedCount == 0) {
+                            txtStatus?.text = "SEARCHING [$currentTab]$dots"
+                        } else {
+                            txtStatus?.text = "FOUND [$currentTab]: $scannedCount $dots"
+                        }
+                    }
+                    heartbeatFrame++
+                }
+                delay(400)
+            }
+        }
+
         // Start Periodic Sync (every 60 seconds)
         syncJob = scope.launch {
             while (isActive) {
@@ -223,6 +391,11 @@ class ScannerService : Service() {
 
     private fun stopScanning() {
         currentState = ScannerState.STOPPED
+        blinkJob?.cancel()
+        blinkJob = null
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+        indicatorView?.visibility = View.GONE
         syncJob?.cancel()
         syncJob = null
         updateButtonUI()
@@ -238,8 +411,7 @@ class ScannerService : Service() {
             Toast.makeText(this@ScannerService, "Auto-syncing to cloud...", Toast.LENGTH_SHORT).show()
         }
         
-        val db = com.totalbattle.chestscanner.data.AppDatabase.getDatabase(this@ScannerService)
-        val apiService = com.totalbattle.chestscanner.network.RetrofitClient.instance
+        val apiService = com.totalbattle.chestscanner.network.ApiService.create()
         
         val success = com.totalbattle.chestscanner.network.SyncManager.syncEvents(this@ScannerService, apiService)
         
@@ -247,7 +419,9 @@ class ScannerService : Service() {
             if (success) {
                 // We don't want to spam success toasts every minute, maybe just a log or a small indicator
                 Log.d(TAG, "Periodic sync successful")
+                scope.launch(Dispatchers.Main) { txtError?.visibility = View.GONE }
             } else {
+                showError("Sync failed. Check API.")
                 Toast.makeText(this@ScannerService, "Sync failed. Saved locally.", Toast.LENGTH_SHORT).show()
             }
         }
@@ -256,27 +430,40 @@ class ScannerService : Service() {
     private fun updateButtonUI() {
         scope.launch(Dispatchers.Main) {
             if (currentState == ScannerState.STOPPED) {
-                btnScan?.text = "▶ START SCAN"
-                btnScan?.setBackgroundColor(Color.parseColor("#DFB239"))
-                txtStatus?.visibility = View.GONE
+                btnScan?.text = "START SCAN"
+                btnScan?.setBackgroundColor(Color.parseColor("#4DDFB239"))
+                txtStatus?.text = "IDLE - READY"
             } else {
-                btnScan?.text = "⏹ STOP ($scannedCount)"
-                btnScan?.setBackgroundColor(Color.parseColor("#E53935")) // Bright Red
-                txtStatus?.visibility = View.VISIBLE
+                btnScan?.text = "STOP"
+                btnScan?.setBackgroundColor(Color.parseColor("#80FF5252"))
+                txtStatus?.text = "LIVE: $scannedCount CHESTS"
             }
+            
+            // Force layout update to ensure visibility
+            try {
+                floatingControlView?.let { 
+                    windowManager.updateViewLayout(it, it.layoutParams as WindowManager.LayoutParams)
+                }
+            } catch (e: Exception) {}
         }
     }
 
     fun onUniqueChestDetected(result: com.totalbattle.chestscanner.ocr.OcrResult) {
         scannedCount++
+        Log.d(TAG, "Unique Chest: ${result.chestType} from ${result.playerName}")
         scope.launch(Dispatchers.Main) {
             updateButtonUI()
-            txtStatus?.text = "✅ Found: ${result.chestType}\n👤 By: ${result.playerName}"
+            // Pulse the status text on find
+            txtStatus?.setTextColor(Color.YELLOW)
+            delay(300)
+            txtStatus?.setTextColor(Color.WHITE)
         }
     }
 
+    private var lastOcrRequestTime = 0L
+
     private suspend fun runAdaptiveCaptureLoop() {
-        var fpsDelay = 1000L
+        var fpsDelay = 150L
         var initFrames = 0
         
         while (currentState != ScannerState.STOPPED) {
@@ -287,18 +474,16 @@ class ScannerService : Service() {
             if (lastFrameTimestamp > 0) {
                 val gap = startTime - lastFrameTimestamp
                 if (gap > 300) {
-                    Log.w(TAG, "Frame drop assumed! Gap = ${gap}ms. Resetting stabilizers.")
                     frameStabilizer.reset()
                     rowExtractor.reset()
                 }
             }
             lastFrameTimestamp = startTime
 
-            // Initialization Phase: run 3-frame baseline scan on start
             if (currentState == ScannerState.INITIALIZING) {
                 val image = imageReader?.acquireLatestImage()
                 if (image != null) {
-                    val bitmap = imageToBitmap(image)
+                    val bitmap = imageToBitmap(image, downscale = 4)
                     frameStabilizer.analyzeFrame(bitmap)
                     bitmap.recycle()
                     image.close()
@@ -307,7 +492,7 @@ class ScannerService : Service() {
                         currentState = ScannerState.RUNNING
                     }
                 }
-                delay(300)
+                delay(200)
                 continue
             }
             
@@ -315,36 +500,56 @@ class ScannerService : Service() {
                 val image = imageReader?.acquireLatestImage()
                 if (image != null) {
                     try {
-                        val bitmap = imageToBitmap(image)
+                        // Optimization: Check stability with a downscaled bitmap first
+                        val smallBitmap = imageToBitmap(image, downscale = 4)
+                        val stability = frameStabilizer.analyzeFrame(smallBitmap)
+                        smallBitmap.recycle()
                         
-                        val stability = frameStabilizer.analyzeFrame(bitmap)
+                        // While scrolling, we scan every 200ms to catch moving chests
+                        // While stable, we scan every 150ms for high precision
+                        val now = System.currentTimeMillis()
+                        val timeSinceLastOcr = now - lastOcrRequestTime
                         
-                        fpsDelay = if (stability.isScrolling) 100L else 333L
-                        
-                        // Only OCR if in stable condition and power mode permits
-                        if (stability.isStable && currentPowerMode != PowerMode.LOW_POWER_MODE) {
-                            // Queue Guard: Try to send to the OCR channel
-                            val sent = ocrQueue.trySend(Bitmap.createBitmap(bitmap)).isSuccess
-                            if (sent) {
+                        val shouldScan = when {
+                            stability.isStable -> timeSinceLastOcr >= 150
+                            stability.isScrolling -> timeSinceLastOcr >= 200 
+                            else -> false
+                        }
+
+                        if (shouldScan && currentPowerMode != PowerMode.LOW_POWER_MODE) {
+                            // Only create full-res bitmap when we actually need to scan
+                            val fullBitmap = imageToBitmap(image, downscale = 1)
+                            
+                            // Periodically detect which tab we are in
+                            if (frameIndex % 5 == 0L) {
+                                val detected = ocrEngine.detectTab(fullBitmap)
+                                if (detected != "Unknown") {
+                                    currentTab = detected
+                                }
+                            }
+
+                            // Pass ownership of fullBitmap to the queue
+                            if (ocrQueue.trySend(fullBitmap).isSuccess) {
+                                lastOcrRequestTime = now
                                 withContext(Dispatchers.Main) {
-                                    // Update indicator if we haven't found a chest in this session yet
-                                    if (scannedCount == 0) txtStatus?.text = "Scanning... [Searching]"
+                                    txtStatus?.text = "LIVE [$currentTab]: $scannedCount"
                                 }
                             } else {
-                                Log.w(TAG, "OCR Queue Full - Dropped Frame")
+                                // If queue is full, we must recycle it ourselves
+                                fullBitmap.recycle()
                             }
-                        } else if (!stability.isStable) {
+                        } else if (stability.isScrolling) {
                             withContext(Dispatchers.Main) {
-                                // If the status hasn't been updated with a name yet, show scrolling status
                                 if (txtStatus?.text?.contains("✅") != true) {
-                                    txtStatus?.text = "Scanning... [Scrolling]"
+                                    txtStatus?.text = "SCROLLING... [Ready]"
                                 }
                             }
                         }
                         
-                        bitmap.recycle()
+                        fpsDelay = if (stability.isScrolling) 60L else 100L
                     } catch (e: Exception) {
                         Log.e(TAG, "Capture analysis failed", e)
+                        showError("Cap Err: ${e.localizedMessage}")
                     } finally {
                         image.close()
                     }
@@ -352,31 +557,46 @@ class ScannerService : Service() {
             }
 
             val elapsed = System.currentTimeMillis() - startTime
-            
-            // CPU Hard Limit Enforcer: downgrade if processing takes > 120ms
-            if (elapsed > 120 && currentPowerMode == PowerMode.HIGH_ACCURACY_MODE) {
-                currentPowerMode = PowerMode.BALANCED_MODE
-                Log.w(TAG, "CPU Stressed: Downgrading to BALANCED_MODE")
-            }
-            
-            val sleepTime = (fpsDelay - elapsed).coerceAtLeast(10L)
+            val sleepTime = (fpsDelay - elapsed).coerceAtLeast(5L)
             delay(sleepTime)
         }
     }
 
-    private fun imageToBitmap(image: android.media.Image): Bitmap {
+    private fun imageToBitmap(image: android.media.Image, downscale: Int = 1): Bitmap {
         val planes = image.planes
         val buffer = planes[0].buffer
         val pixelStride = planes[0].pixelStride
         val rowStride = planes[0].rowStride
         val rowPadding = rowStride - pixelStride * image.width
 
+        val fullWidth = image.width + rowPadding / pixelStride
         val bitmap = Bitmap.createBitmap(
-            image.width + rowPadding / pixelStride,
+            fullWidth,
             image.height, Bitmap.Config.ARGB_8888
         )
         bitmap.copyPixelsFromBuffer(buffer)
-        return bitmap
+
+        // 1. Always crop the padding first to get a clean image
+        val cleanBitmap = if (rowPadding > 0) {
+            val cropped = Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
+            bitmap.recycle()
+            cropped
+        } else {
+            bitmap
+        }
+
+        // 2. Then scale if downscale > 1
+        return if (downscale > 1) {
+            val targetWidth = image.width / downscale
+            val targetHeight = image.height / downscale
+            val scaled = Bitmap.createScaledBitmap(cleanBitmap, targetWidth, targetHeight, true)
+            if (scaled != cleanBitmap) {
+                cleanBitmap.recycle()
+            }
+            scaled
+        } else {
+            cleanBitmap
+        }
     }
 
     private fun createNotificationChannel() {

@@ -6,6 +6,10 @@ import com.totalbattle.chestscanner.data.ChestEventEntity
 import com.totalbattle.chestscanner.ocr.OcrResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 class ChestEventProcessor(
     private val deduplicationEngine: DeduplicationEngine,
@@ -14,30 +18,37 @@ class ChestEventProcessor(
     private val onUniqueChest: (OcrResult) -> Unit
 ) {
     
-    fun process(ocrResult: OcrResult, normalizedY: Float, frameIndex: Long) {
+    fun process(ocrResult: OcrResult, normalizedY: Float, frameIndex: Long, currentTab: String) {
         // System Principle Guarantee: Prioritize correctness over completeness
         // If uncertain (invalid), do NOT log event, do NOT retry aggressively, do NOT infer missing data.
         if (!ocrResult.isValid || ocrResult.boundingBox == null) return
+
+        val actualTime = calculateActualTimestamp(ocrResult.timerText)
         
+        val calendar = java.util.Calendar.getInstance().apply { timeInMillis = actualTime }
+        val time = String.format("%02d:%02d", calendar.get(java.util.Calendar.HOUR_OF_DAY), calendar.get(java.util.Calendar.MINUTE))
+        val gameDay = calculateGameDay(actualTime)
+
         val isDuplicate = deduplicationEngine.isDuplicate(
-            chestType = ocrResult.chestType,
-            playerName = ocrResult.playerName,
+            chestName = ocrResult.chestType,
+            fromPlayer = ocrResult.playerName,
+            source = currentTab,
+            time = time,
+            gameDay = gameDay,
             normalizedY = normalizedY
         )
         
         if (!isDuplicate) {
             // Event Ordering Guarantee
             val eventSequenceId = "${frameIndex}_${normalizedY}"
-            Log.i("EventProcessor", "Unique Chest Detected: ${ocrResult.chestType} from ${ocrResult.playerName} (Seq: $eventSequenceId)")
+            Log.i("EventProcessor", "Unique Chest Detected: ${ocrResult.chestType} from ${ocrResult.playerName} (Tab: $currentTab)")
             
-            val actualTime = calculateActualTimestamp(ocrResult.timerText)
-
             scope.launch {
                 dao.insert(
                     ChestEventEntity(
                         chestName = ocrResult.chestType,
                         fromPlayer = ocrResult.playerName,
-                        source = "Overlay Auto-Scan",
+                        source = currentTab,
                         originalTimer = ocrResult.timerText,
                         actualTimestamp = actualTime
                     )
@@ -77,5 +88,10 @@ class ChestEventProcessor(
         } catch (e: Exception) {
             now.timeInMillis
         }
+    }
+
+    private fun calculateGameDay(timestampMillis: Long): String {
+        val dayFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        return "chests_${dayFormatter.format(Date(timestampMillis))}"
     }
 }

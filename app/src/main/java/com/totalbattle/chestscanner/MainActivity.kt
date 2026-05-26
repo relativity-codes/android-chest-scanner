@@ -117,7 +117,7 @@ class MainActivity : ComponentActivity() {
         }
 
         var selectedTabIndex by remember { mutableStateOf(0) }
-        val tabs = listOf("Overlay", "Simulator")
+        val tabs = listOf("Overlay", "Dashboard", "Simulator")
 
         Column(modifier = Modifier.fillMaxSize()) {
             TabRow(
@@ -134,8 +134,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            if (selectedTabIndex == 0) {
-                OverlayControlScreen(
+            when (selectedTabIndex) {
+                0 -> OverlayControlScreen(
                     onStartService = {
                         if (!Settings.canDrawOverlays(context)) {
                             val intent = Intent(
@@ -152,14 +152,171 @@ class MainActivity : ComponentActivity() {
                         stopService(Intent(context, ScannerService::class.java))
                     }
                 )
+                1 -> SessionDashboardScreen()
+                2 -> SimulatorScreen(
+                    apiBaseUrl = apiBaseUrl,
+                    onApiBaseUrlChange = { apiBaseUrl = it },
+                    isSyncing = isSyncing,
+                    onSync = {
+                        isSyncing = true
+                        scope.launch {
+                            try {
+                                ApiService.setBaseUrl(apiBaseUrl)
+                                val api = ApiService.create()
+                                val success = SyncManager.syncEvents(context, api)
+                                withContext(Dispatchers.Main) {
+                                    syncResult = if (success) "✅ Sync Successful!" else "❌ Sync Failed (Operating Offline)"
+                                    refreshCacheStats()
+                                }
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    syncResult = "❌ Error: ${e.message}"
+                                }
+                            } finally {
+                                isSyncing = false
+                            }
+                        }
+                    },
+                    syncResult = syncResult,
+                    cachedEventsCount = cachedEventsCount,
+                    ocrTextChest = ocrTextChest,
+                    onOcrTextChestChange = { ocrTextChest = it },
+                    ocrTextPlayer = ocrTextPlayer,
+                    onOcrTextPlayerChange = { ocrTextPlayer = it },
+                    ocrTextSource = ocrTextSource,
+                    onOcrTextSourceChange = { ocrTextSource = it },
+                    ocrTextTimer = ocrTextTimer,
+                    onOcrTextTimerChange = { ocrTextTimer = it },
+                    scanStatus = scanStatus,
+                    onScanStatusChange = { scanStatus = it }
+                )
+            }
+        }
+    }
+
+    @Composable
+    fun SessionDashboardScreen() {
+        val context = this
+        val scope = rememberCoroutineScope()
+        var events by remember { mutableStateOf<List<com.totalbattle.chestscanner.data.ChestEventEntity>>(emptyList()) }
+        val scrollState = rememberScrollState()
+
+        LaunchedEffect(Unit) {
+            scope.launch(Dispatchers.IO) {
+                val db = AppDatabase.getDatabase(context)
+                val list = db.chestEventDao().getAllEvents()
+                withContext(Dispatchers.Main) {
+                    events = list
+                }
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "ACTIVE SESSION LOG",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFDFB239)
+                )
+                Text(
+                    text = "${events.size} Chests Found",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.6f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (events.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No chests detected yet in this session.", color = Color.White.copy(alpha = 0.4f))
+                }
             } else {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(20.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    events.reversed().forEach { event ->
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .padding(12.dp)
+                                    .fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(Color(0xFFDFB239).copy(alpha = 0.1f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("🎁", fontSize = 20.sp)
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = event.chestName,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = "By: ${event.fromPlayer} • @ ${event.originalTimer}",
+                                        fontSize = 12.sp,
+                                        color = Color.White.copy(alpha = 0.6f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun SimulatorScreen(
+        apiBaseUrl: String,
+        onApiBaseUrlChange: (String) -> Unit,
+        isSyncing: Boolean,
+        onSync: () -> Unit,
+        syncResult: String?,
+        cachedEventsCount: Int,
+        ocrTextChest: String,
+        onOcrTextChestChange: (String) -> Unit,
+        ocrTextPlayer: String,
+        onOcrTextPlayerChange: (String) -> Unit,
+        ocrTextSource: String,
+        onOcrTextSourceChange: (String) -> Unit,
+        ocrTextTimer: String,
+        onOcrTextTimerChange: (String) -> Unit,
+        scanStatus: String?,
+        onScanStatusChange: (String?) -> Unit
+    ) {
+        val scope = rememberCoroutineScope()
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(20.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
             // Title Header
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -203,7 +360,7 @@ class MainActivity : ComponentActivity() {
 
                     OutlinedTextField(
                         value = apiBaseUrl,
-                        onValueChange = { apiBaseUrl = it },
+                        onValueChange = onApiBaseUrlChange,
                         label = { Text("Next.js Server API Endpoint") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
@@ -214,26 +371,7 @@ class MainActivity : ComponentActivity() {
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Button(
-                        onClick = {
-                            isSyncing = true
-                            scope.launch {
-                                try {
-                                    ApiService.setBaseUrl(apiBaseUrl)
-                                    val api = ApiService.create()
-                                    val success = SyncManager.syncEvents(context, api)
-                                    withContext(Dispatchers.Main) {
-                                        syncResult = if (success) "✅ Sync Successful!" else "❌ Sync Failed (Operating Offline)"
-                                        refreshCacheStats()
-                                    }
-                                } catch (e: Exception) {
-                                    withContext(Dispatchers.Main) {
-                                        syncResult = "❌ Error: ${e.message}"
-                                    }
-                                } finally {
-                                    isSyncing = false
-                                }
-                            }
-                        },
+                        onClick = onSync,
                         enabled = !isSyncing,
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDFB239))
@@ -300,7 +438,7 @@ class MainActivity : ComponentActivity() {
 
                     OutlinedTextField(
                         value = ocrTextChest,
-                        onValueChange = { ocrTextChest = it },
+                        onValueChange = onOcrTextChestChange,
                         label = { Text("Raw OCR Chest Text") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFDFB239))
@@ -309,7 +447,7 @@ class MainActivity : ComponentActivity() {
 
                     OutlinedTextField(
                         value = ocrTextPlayer,
-                        onValueChange = { ocrTextPlayer = it },
+                        onValueChange = onOcrTextPlayerChange,
                         label = { Text("Raw OCR Player Name") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFDFB239))
@@ -318,7 +456,7 @@ class MainActivity : ComponentActivity() {
 
                     OutlinedTextField(
                         value = ocrTextSource,
-                        onValueChange = { ocrTextSource = it },
+                        onValueChange = onOcrTextSourceChange,
                         label = { Text("Raw OCR Source") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFDFB239))
@@ -327,7 +465,7 @@ class MainActivity : ComponentActivity() {
 
                     OutlinedTextField(
                         value = ocrTextTimer,
-                        onValueChange = { ocrTextTimer = it },
+                        onValueChange = onOcrTextTimerChange,
                         label = { Text("Raw OCR Timer Remaining") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color(0xFFDFB239))
@@ -338,7 +476,7 @@ class MainActivity : ComponentActivity() {
                         onClick = {
                             scope.launch {
                                 try {
-                                    scanStatus = "🔄 Normalizing OCR Fields..."
+                                    onScanStatusChange("🔄 Normalizing OCR Fields...")
                                     ApiService.setBaseUrl(apiBaseUrl)
                                     val api = ApiService.create()
                                     val norm = Normalizer()
@@ -352,7 +490,7 @@ class MainActivity : ComponentActivity() {
                                     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
                                     val gameDay = "chests_${sdf.format(Date(claimTime))}"
                                     
-                                    scanStatus = "📡 Normalization Complete:\n➔ Player: $normalizedPlayer\n➔ Source: $normalizedSource\n➔ Timer Time: ${Date(claimTime)}\n\nUploading to Next.js API..."
+                                    onScanStatusChange("📡 Normalization Complete:\n➔ Player: $normalizedPlayer\n➔ Source: $normalizedSource\n➔ Timer Time: ${Date(claimTime)}\n\nUploading to Next.js API...")
                                     
                                     val isoFormatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
                                     isoFormatter.timeZone = TimeZone.getTimeZone("UTC")
@@ -370,9 +508,9 @@ class MainActivity : ComponentActivity() {
                                         )
                                     )
 
-                                    scanStatus = "✅ Scanned drop uploaded in REAL-TIME!\nCheck your browser dashboard immediately."
+                                    onScanStatusChange("✅ Scanned drop uploaded in REAL-TIME!\nCheck your browser dashboard immediately.")
                                 } catch (e: Exception) {
-                                    scanStatus = "❌ Error uploading: ${e.message}"
+                                    onScanStatusChange("❌ Error uploading: ${e.message}")
                                 }
                             }
                         },
@@ -396,8 +534,6 @@ class MainActivity : ComponentActivity() {
                             color = Color(0xFFF8FAFC)
                         )
                     }
-                }
-            }
                 }
             }
         }

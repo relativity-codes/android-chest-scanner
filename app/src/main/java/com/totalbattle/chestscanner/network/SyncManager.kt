@@ -47,13 +47,17 @@ object SyncManager {
                 )
             }
 
-            apiService.uploadChestsBatch(batchRequests)
+            val response = apiService.uploadChestsBatch(batchRequests)
             
             // Clear the DB once synced
             db.chestEventDao().deleteAll()
 
             Log.d(TAG, "✅ Synced ${events.size} events successfully!")
             true
+        } catch (e: retrofit2.HttpException) {
+            val errorBody = e.response()?.errorBody()?.string()
+            Log.e(TAG, "❌ Server rejected sync (HTTP ${e.code()}): $errorBody")
+            false
         } catch (e: Exception) {
             Log.e(TAG, "❌ Event sync failed.", e)
             false
