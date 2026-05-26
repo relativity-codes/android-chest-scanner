@@ -87,7 +87,7 @@ class MainActivity : ComponentActivity() {
         val context = this
         val scope = rememberCoroutineScope()
         
-        var apiBaseUrl by remember { mutableStateOf("http://10.0.2.2:3000/") }
+        var apiBaseUrl by remember { mutableStateOf("https://elf-clan.vercel.app/") }
         var isSyncing by remember { mutableStateOf(false) }
         var syncResult by remember { mutableStateOf<String?>(null) }
         

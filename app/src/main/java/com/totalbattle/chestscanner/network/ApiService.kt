@@ -39,7 +39,7 @@ interface ApiService {
     suspend fun reportUnknownPlayer(@Body request: UnknownPlayerRequest)
 
     companion object {
-        private var BASE_URL = "http://10.0.2.2:3000/" // Android emulator localhost alias
+        private var BASE_URL = "https://elf-clan.vercel.app/"
 
         fun setBaseUrl(url: String) {
             BASE_URL = if (url.endsWith("/")) url else "$url/"
