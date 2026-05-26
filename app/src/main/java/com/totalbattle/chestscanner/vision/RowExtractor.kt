@@ -120,6 +120,11 @@ class RowExtractor {
         val subset = Bitmap.createBitmap(src, left, top, width, height)
         // Force a deep copy to ensure it's independent of the source bitmap's lifecycle
         val copy = subset.copy(subset.config ?: Bitmap.Config.ARGB_8888, false)
+        
+        if (copy == null) {
+            return subset // Fallback on OOM: return subset directly to avoid NullPointerException
+        }
+        
         if (subset != src) {
             subset.recycle()
         }

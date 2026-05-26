@@ -562,6 +562,8 @@ class ScannerService : Service() {
         }
     }
 
+    private var reusableBuffer: java.nio.ByteBuffer? = null
+
     private fun imageToBitmap(image: android.media.Image, downscale: Int = 1): Bitmap {
         val planes = image.planes
         val buffer = planes[0].buffer
@@ -574,7 +576,30 @@ class ScannerService : Service() {
             fullWidth,
             image.height, Bitmap.Config.ARGB_8888
         )
-        bitmap.copyPixelsFromBuffer(buffer)
+        
+        buffer.position(0)
+        val expectedSize = bitmap.byteCount
+        if (buffer.remaining() < expectedSize) {
+            // The buffer is missing the rowPadding at the end of the very last row.
+            // We pad it using a reusable buffer to avoid allocating memory on every frame.
+            var localBuffer = reusableBuffer
+            if (localBuffer == null || localBuffer.capacity() < expectedSize) {
+                localBuffer = java.nio.ByteBuffer.allocateDirect(expectedSize)
+                reusableBuffer = localBuffer
+            }
+            val nonNullBuffer = localBuffer!!
+            nonNullBuffer.clear()
+            nonNullBuffer.put(buffer)
+            // Fill the rest with zeros to satisfy Bitmap.copyPixelsFromBuffer
+            val paddingNeeded = expectedSize - nonNullBuffer.position()
+            for (i in 0 until paddingNeeded) {
+                nonNullBuffer.put(0.toByte())
+            }
+            nonNullBuffer.flip()
+            bitmap.copyPixelsFromBuffer(nonNullBuffer)
+        } else {
+            bitmap.copyPixelsFromBuffer(buffer)
+        }
 
         // 1. Always crop the padding first to get a clean image
         val cleanBitmap = if (rowPadding > 0) {

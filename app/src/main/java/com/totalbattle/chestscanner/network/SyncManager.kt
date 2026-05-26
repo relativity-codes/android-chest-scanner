@@ -29,6 +29,7 @@ object SyncManager {
             isoFormatter.timeZone = TimeZone.getTimeZone("UTC")
 
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            val norm = com.totalbattle.chestscanner.ocr.Normalizer()
 
             val batchRequests = events.map { event ->
                 // If we calculated an actual timestamp from the timer text ("5m ago"), use that.
@@ -37,10 +38,14 @@ object SyncManager {
                 val gameDay = "chests_${sdf.format(Date(claimTime))}"
                 val timeIso = isoFormatter.format(Date(claimTime))
                 
+                val normalizedChest = event.chestName.trim()
+                val normalizedPlayer = norm.normalizePlayer(event.fromPlayer)
+                val normalizedSource = norm.normalizeSource(event.source ?: "Overlay Auto-Scan")
+
                 ChestRequest(
-                    chestName = event.chestName,
-                    fromPlayer = event.fromPlayer,
-                    source = event.source ?: "Overlay Auto-Scan",
+                    chestName = normalizedChest,
+                    fromPlayer = normalizedPlayer,
+                    source = normalizedSource,
                     time = timeIso,
                     gameDay = gameDay,
                     originalTimer = event.originalTimer
