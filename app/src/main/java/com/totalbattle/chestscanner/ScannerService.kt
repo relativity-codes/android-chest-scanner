@@ -19,6 +19,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import com.totalbattle.chestscanner.util.ErrorLogger
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
@@ -73,7 +74,7 @@ class ScannerService : Service() {
         super.onCreate()
         
         if (!org.opencv.android.OpenCVLoader.initDebug()) {
-            Log.e(TAG, "OpenCV initialization failed!")
+            ErrorLogger.logError(TAG, "OpenCV initialization failed!", Exception("OpenCV Init Failed"))
             showError("OpenCV Init Failed")
         }
 
@@ -111,7 +112,7 @@ class ScannerService : Service() {
                                         eventProcessor.process(ocrResult, row.normalizedY, frameIndex, currentTab)
                                     }
                                 } catch (e: Exception) {
-                                    Log.e(TAG, "Row processing error", e)
+                                    ErrorLogger.logError(TAG, "Row processing error", e)
                                     showError("Row Err: ${e.localizedMessage}")
                                 } finally {
                                     row.bitmap.recycle()
@@ -120,7 +121,7 @@ class ScannerService : Service() {
                         }
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "OCR Consumer loop error", e)
+                    ErrorLogger.logError(TAG, "OCR Consumer loop error", e)
                     showError("OCR Loop Err: ${e.localizedMessage}")
                 } finally {
                     bitmap.recycle()
@@ -301,7 +302,7 @@ class ScannerService : Service() {
         try {
             windowManager.addView(floatingControlView, params)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to add overlay", e)
+            ErrorLogger.logError(TAG, "Failed to add overlay", e)
             floatingControlView = null
         }
 
@@ -327,7 +328,7 @@ class ScannerService : Service() {
                 stopScanning()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Toggle Scanning Failed", e)
+            ErrorLogger.logError(TAG, "Toggle Scanning Failed", e)
             showError("Start Failed: ${e.message}")
         }
     }
@@ -548,7 +549,7 @@ class ScannerService : Service() {
                         
                         fpsDelay = if (stability.isScrolling) 60L else 100L
                     } catch (e: Exception) {
-                        Log.e(TAG, "Capture analysis failed", e)
+                        ErrorLogger.logError(TAG, "Frame processing error", e)
                         showError("Cap Err: ${e.localizedMessage}")
                     } finally {
                         image.close()

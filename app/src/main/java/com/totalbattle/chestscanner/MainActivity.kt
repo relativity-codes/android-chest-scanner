@@ -33,6 +33,7 @@ import com.totalbattle.chestscanner.network.ApiService
 import com.totalbattle.chestscanner.network.ChestRequest
 import com.totalbattle.chestscanner.network.SyncManager
 import com.totalbattle.chestscanner.ocr.Normalizer
+import com.totalbattle.chestscanner.util.ErrorLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -117,7 +118,7 @@ class MainActivity : ComponentActivity() {
         }
 
         var selectedTabIndex by remember { mutableStateOf(0) }
-        val tabs = listOf("Overlay", "Dashboard", "Simulator")
+        val tabs = listOf("Overlay", "Dashboard", "Simulator", "Debug Logs")
 
         Column(modifier = Modifier.fillMaxSize()) {
             TabRow(
@@ -190,6 +191,7 @@ class MainActivity : ComponentActivity() {
                     scanStatus = scanStatus,
                     onScanStatusChange = { scanStatus = it }
                 )
+                3 -> DebugLogScreen()
             }
         }
     }
@@ -575,6 +577,68 @@ class MainActivity : ComponentActivity() {
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f))
             ) {
                 Text("STOP SERVICE", color = Color.White)
+            }
+        }
+    }
+
+    @Composable
+    fun DebugLogScreen() {
+        val logs by ErrorLogger.logs.collectAsState()
+
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Debug Logs (${logs.size})",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFDFB239)
+                )
+                Button(
+                    onClick = { ErrorLogger.clear() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f))
+                ) {
+                    Text("Clear", color = Color.White)
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (logs.isEmpty()) {
+                Text("No errors logged yet.", color = Color.Gray)
+            } else {
+                androidx.compose.foundation.lazy.LazyColumn {
+                    items(logs.size) { index ->
+                        val log = logs[index]
+                        val dateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
+                        val timeStr = dateFormat.format(Date(log.timestamp))
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(text = log.tag, color = Color(0xFFDFB239), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Text(text = timeStr, color = Color.Gray, fontSize = 12.sp)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(text = log.message, color = Color.White, fontSize = 14.sp)
+                                if (!log.exceptionMessage.isNullOrEmpty()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(text = "Ex: ${log.exceptionMessage}", color = Color.Red, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

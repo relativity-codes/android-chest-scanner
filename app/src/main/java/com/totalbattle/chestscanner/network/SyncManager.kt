@@ -3,6 +3,7 @@ package com.totalbattle.chestscanner.network
 import android.content.Context
 import android.util.Log
 import com.totalbattle.chestscanner.data.AppDatabase
+import com.totalbattle.chestscanner.util.ErrorLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -62,9 +63,11 @@ object SyncManager {
         } catch (e: retrofit2.HttpException) {
             val errorBody = e.response()?.errorBody()?.string()
             Log.e(TAG, "❌ Server rejected sync (HTTP ${e.code()}): $errorBody")
+            ErrorLogger.logError(TAG, "Server rejected sync (HTTP ${e.code()}): $errorBody", e)
             false
         } catch (e: Exception) {
             Log.e(TAG, "❌ Event sync failed.", e)
+            ErrorLogger.logError(TAG, "Event sync failed", e)
             false
         }
     }
