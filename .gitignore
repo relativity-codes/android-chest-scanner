@@ -1,0 +1,30 @@
+# Built artifacts
+build/
+*.apk
+*.aab
+
+# Android Studio / IDE
+.idea/
+*.iml
+.DS_Store
+captures/
+navigation/
+assetSearch/
+
+# Local configuration
+local.properties
+
+# Signing files (NEVER COMMIT THESE)
+*.jks
+*.keystore
+*.p12
+
+# Gradle
+.gradle/
+build/
+
+# Log files
+*.log
+
+# Extraction folders
+.temp/

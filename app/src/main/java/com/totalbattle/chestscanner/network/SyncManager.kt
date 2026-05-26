@@ -1,0 +1,60 @@
+package com.totalbattle.chestscanner.network
+
+import android.content.Context
+import android.util.Log
+import com.totalbattle.chestscanner.data.AppDatabase
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.*
+
+object SyncManager {
+    private const val TAG = "SyncManager"
+
+    suspend fun syncEvents(context: Context, apiService: ApiService): Boolean = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "Starting Event Sync to Cloud API...")
+            
+            val db = AppDatabase.getDatabase(context)
+            val events = db.chestEventDao().getAllEvents()
+            
+            if (events.isEmpty()) {
+                Log.d(TAG, "No events to sync.")
+                return@withContext true
+            }
+
+            // In a real app we might batch these, but for this scaffold we'll loop or use a batch API.
+            // Using the existing uploadChest API for each event for simplicity.
+            val isoFormatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+            isoFormatter.timeZone = TimeZone.getTimeZone("UTC")
+
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+            val batchRequests = events.map { event ->
+                val claimTime = event.timestamp
+                val gameDay = "chests_${sdf.format(Date(claimTime))}"
+                val timeIso = isoFormatter.format(Date(claimTime))
+                
+                ChestRequest(
+                    chestName = event.chestName,
+                    fromPlayer = event.fromPlayer,
+                    source = event.source ?: "Overlay Auto-Scan",
+                    time = timeIso,
+                    gameDay = gameDay,
+                    originalTimer = "Detected"
+                )
+            }
+
+            apiService.uploadChestsBatch(batchRequests)
+            
+            // Clear the DB once synced
+            db.chestEventDao().deleteAll()
+
+            Log.d(TAG, "✅ Synced ${events.size} events successfully!")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Event sync failed.", e)
+            false
+        }
+    }
+}
