@@ -17,6 +17,7 @@ data class OcrResult(
     val rawText: String,
     val chestType: String,
     val playerName: String,
+    val timerText: String,
     val boundingBox: Rect?,
     val confidence: Float
 )
@@ -26,6 +27,7 @@ class OcrEngine {
     
     private val chestRegex = Regex("(?i)(.*?)Chest")
     private val playerRegex = Regex("(?i)From:\\s*(.*)")
+    private val timerRegex = Regex("(?i)(\\d{1,2})h\\s*(\\d{1,2})m")
     
     // OCR Debounce layer (Map of region normalizedY string -> timestamp)
     private val lastOcrTimes = mutableMapOf<String, Long>()
@@ -49,6 +51,7 @@ class OcrEngine {
         
         var chestType = ""
         var playerName = ""
+        var timerText = ""
         var rawTextCombined = ""
         var boundingBox: Rect? = null
         var totalConfidence = 1.0f // ML Kit doesn't provide confidence via standard text blocks, defaulting for contract
@@ -75,13 +78,18 @@ class OcrEngine {
             if (playerMatch != null) {
                 playerName = playerMatch.groupValues[1].trim()
             }
+
+            val timerMatch = timerRegex.find(text)
+            if (timerMatch != null) {
+                timerText = timerMatch.groupValues[0].trim()
+            }
         }
         
         preprocessed.recycle()
 
         // Missing Bounding Box check
         if (boundingBox == null) {
-            return OcrResult(false, rawTextCombined, chestType, playerName, null, 0.0f)
+            return OcrResult(false, rawTextCombined, chestType, playerName, timerText, null, 0.0f)
         }
 
         // Stage 4: Strict validation & Sanity Filter
@@ -92,6 +100,7 @@ class OcrEngine {
             rawText = rawTextCombined.trim(),
             chestType = chestType,
             playerName = playerName,
+            timerText = timerText,
             boundingBox = boundingBox,
             confidence = totalConfidence // Mock confidence since ML Kit Latin base doesn't expose it
         )

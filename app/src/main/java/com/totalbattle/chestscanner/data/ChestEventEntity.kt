@@ -10,5 +10,7 @@ data class ChestEventEntity(
     val chestName: String,
     val fromPlayer: String,
     val source: String? = null,
+    val originalTimer: String = "",
+    val actualTimestamp: Long = 0L,
     val timestamp: Long = System.currentTimeMillis()
 )

@@ -31,7 +31,9 @@ object SyncManager {
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
             val batchRequests = events.map { event ->
-                val claimTime = event.timestamp
+                // If we calculated an actual timestamp from the timer text ("5m ago"), use that.
+                // Otherwise fallback to the time the chest was scanned.
+                val claimTime = if (event.actualTimestamp > 0) event.actualTimestamp else event.timestamp
                 val gameDay = "chests_${sdf.format(Date(claimTime))}"
                 val timeIso = isoFormatter.format(Date(claimTime))
                 
@@ -41,7 +43,7 @@ object SyncManager {
                     source = event.source ?: "Overlay Auto-Scan",
                     time = timeIso,
                     gameDay = gameDay,
-                    originalTimer = "Detected"
+                    originalTimer = event.originalTimer
                 )
             }
 

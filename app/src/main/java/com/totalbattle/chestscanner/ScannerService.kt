@@ -40,8 +40,10 @@ class ScannerService : Service() {
     
     private var floatingControlView: View? = null
     private var btnScan: Button? = null
+    private var txtStatus: android.widget.TextView? = null
     
     private val scope = CoroutineScope(Dispatchers.Main + Job())
+    private var syncJob: Job? = null
     private var currentState = ScannerState.STOPPED
     private var currentPowerMode = PowerMode.HIGH_ACCURACY_MODE
     private var scannedCount = 0
@@ -139,32 +141,51 @@ class ScannerService : Service() {
     }
 
     private fun showFloatingControl() {
-        // Safe Overlay Zone Rule: edge-anchored, must not overlap detection regions
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 20
-            y = 100 // Edge anchored, avoids the main list rect
+            x = 10
+            y = 250 // Positioned for visibility below status bar
         }
 
-        val controlLayout = FrameLayout(this)
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#F2000000")) // Almost solid black for contrast
+            setPadding(20, 20, 20, 20)
+        }
+
         btnScan = Button(this).apply {
             text = "▶ START SCAN"
-            setBackgroundColor(Color.parseColor("#DFB239"))
+            setBackgroundColor(Color.parseColor("#DFB239")) // Gold
             setTextColor(Color.BLACK)
-            setPadding(30, 20, 30, 20)
-            textSize = 14f
+            setPadding(40, 25, 40, 25)
+            textSize = 15f
             setTypeface(null, Typeface.BOLD)
         }
+
+        txtStatus = android.widget.TextView(this).apply {
+            text = "Ready to Scan"
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            setPadding(10, 20, 10, 10)
+            visibility = View.GONE
+            setLineSpacing(0f, 1.3f)
+        }
         
-        controlLayout.addView(btnScan)
-        floatingControlView = controlLayout
-        windowManager.addView(floatingControlView, params)
+        container.addView(btnScan)
+        container.addView(txtStatus)
+        floatingControlView = container
+        
+        try {
+            windowManager.addView(floatingControlView, params)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to add overlay", e)
+        }
 
         btnScan?.setOnClickListener {
             toggleScanning()
@@ -182,8 +203,19 @@ class ScannerService : Service() {
     private fun startScanning() {
         currentState = ScannerState.INITIALIZING
         scannedCount = 0
+        deduplicationEngine.clearSession()
         updateButtonUI()
         
+        // Start Periodic Sync (every 60 seconds)
+        syncJob = scope.launch {
+            while (isActive) {
+                delay(60_000) // Wait 1 minute
+                if (currentState == ScannerState.RUNNING || currentState == ScannerState.RECOVERING) {
+                    performCloudSync()
+                }
+            }
+        }
+
         scope.launch(Dispatchers.Default) {
             runAdaptiveCaptureLoop()
         }
@@ -191,26 +223,56 @@ class ScannerService : Service() {
 
     private fun stopScanning() {
         currentState = ScannerState.STOPPED
+        syncJob?.cancel()
+        syncJob = null
         updateButtonUI()
-        Toast.makeText(this, "Batch Syncing $scannedCount chests...", Toast.LENGTH_SHORT).show()
-        // TODO: SyncManager call
+        
+        // Final Sync
+        scope.launch {
+            performCloudSync()
+        }
+    }
+
+    private suspend fun performCloudSync() {
+        withContext(Dispatchers.Main) {
+            Toast.makeText(this@ScannerService, "Auto-syncing to cloud...", Toast.LENGTH_SHORT).show()
+        }
+        
+        val db = com.totalbattle.chestscanner.data.AppDatabase.getDatabase(this@ScannerService)
+        val apiService = com.totalbattle.chestscanner.network.RetrofitClient.instance
+        
+        val success = com.totalbattle.chestscanner.network.SyncManager.syncEvents(this@ScannerService, apiService)
+        
+        withContext(Dispatchers.Main) {
+            if (success) {
+                // We don't want to spam success toasts every minute, maybe just a log or a small indicator
+                Log.d(TAG, "Periodic sync successful")
+            } else {
+                Toast.makeText(this@ScannerService, "Sync failed. Saved locally.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun updateButtonUI() {
         scope.launch(Dispatchers.Main) {
             if (currentState == ScannerState.STOPPED) {
                 btnScan?.text = "▶ START SCAN"
-                btnScan?.setBackgroundColor(Color.parseColor("#DFB239")) // Gold
+                btnScan?.setBackgroundColor(Color.parseColor("#DFB239"))
+                txtStatus?.visibility = View.GONE
             } else {
                 btnScan?.text = "⏹ STOP ($scannedCount)"
-                btnScan?.setBackgroundColor(Color.parseColor("#E53935")) // Red
+                btnScan?.setBackgroundColor(Color.parseColor("#E53935")) // Bright Red
+                txtStatus?.visibility = View.VISIBLE
             }
         }
     }
 
     fun onUniqueChestDetected(result: com.totalbattle.chestscanner.ocr.OcrResult) {
         scannedCount++
-        updateButtonUI()
+        scope.launch(Dispatchers.Main) {
+            updateButtonUI()
+            txtStatus?.text = "✅ Found: ${result.chestType}\n👤 By: ${result.playerName}"
+        }
     }
 
     private suspend fun runAdaptiveCaptureLoop() {
@@ -263,8 +325,20 @@ class ScannerService : Service() {
                         if (stability.isStable && currentPowerMode != PowerMode.LOW_POWER_MODE) {
                             // Queue Guard: Try to send to the OCR channel
                             val sent = ocrQueue.trySend(Bitmap.createBitmap(bitmap)).isSuccess
-                            if (!sent) {
+                            if (sent) {
+                                withContext(Dispatchers.Main) {
+                                    // Update indicator if we haven't found a chest in this session yet
+                                    if (scannedCount == 0) txtStatus?.text = "Scanning... [Searching]"
+                                }
+                            } else {
                                 Log.w(TAG, "OCR Queue Full - Dropped Frame")
+                            }
+                        } else if (!stability.isStable) {
+                            withContext(Dispatchers.Main) {
+                                // If the status hasn't been updated with a name yet, show scrolling status
+                                if (txtStatus?.text?.contains("✅") != true) {
+                                    txtStatus?.text = "Scanning... [Scrolling]"
+                                }
                             }
                         }
                         
