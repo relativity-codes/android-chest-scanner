@@ -10,8 +10,11 @@ interface ChestEventDao {
     suspend fun insert(event: ChestEventEntity)
 
     @Query("SELECT * FROM chest_events ORDER BY timestamp ASC")
-    suspend fun getAllEvents(): List<ChestEventEntity>
+    fun getAllEvents(): kotlinx.coroutines.flow.Flow<List<ChestEventEntity>>
 
-    @Query("DELETE FROM chest_events")
-    suspend fun deleteAll()
+    @Query("SELECT * FROM chest_events WHERE isSynced = 0 ORDER BY timestamp ASC")
+    suspend fun getUnsyncedEvents(): List<ChestEventEntity>
+
+    @Query("UPDATE chest_events SET isSynced = 1 WHERE id IN (:ids)")
+    suspend fun markAsSynced(ids: List<Int>)
 }

@@ -111,18 +111,18 @@ class ScannerService : Service() {
                                     if (ocrResult != null && ocrResult.isValid) {
                                         eventProcessor.process(ocrResult, row.normalizedY, frameIndex, currentTab)
                                     }
-                                } catch (e: Exception) {
+                                } catch (e: Throwable) {
                                     ErrorLogger.logError(TAG, "Row processing error", e)
-                                    showError("Row Err: ${e.localizedMessage}")
+                                    showError("Row Err: ${e.message ?: e.javaClass.simpleName}")
                                 } finally {
                                     row.bitmap.recycle()
                                 }
                             }
                         }
                     }
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     ErrorLogger.logError(TAG, "OCR Consumer loop error", e)
-                    showError("OCR Loop Err: ${e.localizedMessage}")
+                    showError("OCR Loop Err: ${e.message ?: e.javaClass.simpleName}")
                 } finally {
                     bitmap.recycle()
                 }
@@ -548,9 +548,9 @@ class ScannerService : Service() {
                         }
                         
                         fpsDelay = if (stability.isScrolling) 60L else 100L
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         ErrorLogger.logError(TAG, "Frame processing error", e)
-                        showError("Cap Err: ${e.localizedMessage}")
+                        showError("Cap Err: ${e.message ?: e.javaClass.simpleName}")
                     } finally {
                         image.close()
                     }

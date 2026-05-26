@@ -106,7 +106,7 @@ class MainActivity : ComponentActivity() {
         fun refreshCacheStats() {
             scope.launch(Dispatchers.IO) {
                 val db = AppDatabase.getDatabase(context)
-                val events = db.chestEventDao().getAllEvents().size
+                val events = db.chestEventDao().getUnsyncedEvents().size
                 withContext(Dispatchers.Main) {
                     cachedEventsCount = events
                 }
@@ -200,18 +200,9 @@ class MainActivity : ComponentActivity() {
     fun SessionDashboardScreen() {
         val context = this
         val scope = rememberCoroutineScope()
-        var events by remember { mutableStateOf<List<com.totalbattle.chestscanner.data.ChestEventEntity>>(emptyList()) }
+        val db = remember { AppDatabase.getDatabase(context) }
+        val events by db.chestEventDao().getAllEvents().collectAsState(initial = emptyList())
         val scrollState = rememberScrollState()
-
-        LaunchedEffect(Unit) {
-            scope.launch(Dispatchers.IO) {
-                val db = AppDatabase.getDatabase(context)
-                val list = db.chestEventDao().getAllEvents()
-                withContext(Dispatchers.Main) {
-                    events = list
-                }
-            }
-        }
 
         Column(
             modifier = Modifier

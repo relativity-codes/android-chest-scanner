@@ -12,5 +12,6 @@ data class ChestEventEntity(
     val source: String? = null,
     val originalTimer: String = "",
     val actualTimestamp: Long = 0L,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val isSynced: Boolean = false
 )

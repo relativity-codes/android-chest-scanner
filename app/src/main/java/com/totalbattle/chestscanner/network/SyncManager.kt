@@ -17,7 +17,7 @@ object SyncManager {
             Log.d(TAG, "Starting Event Sync to Cloud API...")
             
             val db = AppDatabase.getDatabase(context)
-            val events = db.chestEventDao().getAllEvents()
+            val events = db.chestEventDao().getUnsyncedEvents()
             
             if (events.isEmpty()) {
                 Log.d(TAG, "No events to sync.")
@@ -55,8 +55,8 @@ object SyncManager {
 
             val response = apiService.uploadChestsBatch(batchRequests)
             
-            // Clear the DB once synced
-            db.chestEventDao().deleteAll()
+            // Mark as synced instead of deleting
+            db.chestEventDao().markAsSynced(events.map { it.id })
 
             Log.d(TAG, "✅ Synced ${events.size} events successfully!")
             true
