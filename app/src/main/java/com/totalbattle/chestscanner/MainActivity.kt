@@ -130,7 +130,7 @@ class MainActivity : ComponentActivity() {
                     Tab(
                         selected = selectedTabIndex == index,
                         onClick = { selectedTabIndex = index },
-                        text = { Text(title) }
+                        text = { Text(title, fontSize = 12.sp) }
                     )
                 }
             }
