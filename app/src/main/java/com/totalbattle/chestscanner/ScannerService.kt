@@ -412,7 +412,7 @@ class ScannerService : Service() {
             Toast.makeText(this@ScannerService, "Auto-syncing to cloud...", Toast.LENGTH_SHORT).show()
         }
         
-        val apiService = com.totalbattle.chestscanner.network.ApiService.create()
+        val apiService = com.totalbattle.chestscanner.network.ApiService.create(this@ScannerService)
         
         val success = com.totalbattle.chestscanner.network.SyncManager.syncEvents(this@ScannerService, apiService)
         

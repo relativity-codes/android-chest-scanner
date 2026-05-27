@@ -88,7 +88,7 @@ class MainActivity : ComponentActivity() {
         val context = this
         val scope = rememberCoroutineScope()
         
-        var apiBaseUrl by remember { mutableStateOf("https://elf-clan.vercel.app/") }
+        var apiBaseUrl by remember { mutableStateOf(ApiService.getBaseUrl(context)) }
         var isSyncing by remember { mutableStateOf(false) }
         var syncResult by remember { mutableStateOf<String?>(null) }
         
@@ -162,8 +162,8 @@ class MainActivity : ComponentActivity() {
                         isSyncing = true
                         scope.launch {
                             try {
-                                ApiService.setBaseUrl(apiBaseUrl)
-                                val api = ApiService.create()
+                                ApiService.setBaseUrl(context, apiBaseUrl)
+                                val api = ApiService.create(context)
                                 val success = SyncManager.syncEvents(context, api)
                                 withContext(Dispatchers.Main) {
                                     syncResult = if (success) "✅ Sync Successful!" else "❌ Sync Failed (Operating Offline)"
@@ -232,7 +232,7 @@ class MainActivity : ComponentActivity() {
                     onClick = {
                         scope.launch {
                             try {
-                                val api = com.totalbattle.chestscanner.network.ApiService.create()
+                                val api = com.totalbattle.chestscanner.network.ApiService.create(context)
                                 com.totalbattle.chestscanner.network.SyncManager.syncEvents(context, api)
                                 android.widget.Toast.makeText(context, "Sync Triggered", android.widget.Toast.LENGTH_SHORT).show()
                             } catch(e: Exception) {
@@ -323,6 +323,7 @@ class MainActivity : ComponentActivity() {
         scanStatus: String?,
         onScanStatusChange: (String?) -> Unit
     ) {
+        val context = androidx.compose.ui.platform.LocalContext.current
         val scope = rememberCoroutineScope()
         Column(
             modifier = Modifier
@@ -346,7 +347,7 @@ class MainActivity : ComponentActivity() {
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "ELF CHEST RADAR",
+                    text = "TOTAL BATTLE CHEST SCANNER",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Black,
                     color = Color(0xFFDFB239),
@@ -491,8 +492,8 @@ class MainActivity : ComponentActivity() {
                             scope.launch {
                                 try {
                                     onScanStatusChange("🔄 Normalizing OCR Fields...")
-                                    ApiService.setBaseUrl(apiBaseUrl)
-                                    val api = ApiService.create()
+                                    ApiService.setBaseUrl(context, apiBaseUrl)
+                                    val api = ApiService.create(context)
                                     val norm = Normalizer()
 
                                     // Run OCR Ports

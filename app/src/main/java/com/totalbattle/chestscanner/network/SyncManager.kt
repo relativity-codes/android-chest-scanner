@@ -56,12 +56,18 @@ object SyncManager {
 
             val response = apiService.uploadChestsBatch(batchRequests)
             
-            // Mark as synced instead of deleting
-            db.chestEventDao().markAsSynced(events.map { it.id })
+            if (response.success) {
+                // Mark as synced instead of deleting
+                db.chestEventDao().markAsSynced(events.map { it.id })
 
-            Log.d(TAG, "✅ Synced ${events.size} events successfully!")
-            ErrorLogger.logError(TAG, "✅ API Request Successful. Uploaded ${events.size} chests.", null)
-            true
+                Log.d(TAG, "✅ Synced ${events.size} events successfully!")
+                ErrorLogger.logError(TAG, "✅ API Request Successful. Uploaded ${events.size} chests.", null)
+                true
+            } else {
+                Log.e(TAG, "❌ Server returned success=false during sync.")
+                ErrorLogger.logError(TAG, "Server returned success=false", null)
+                false
+            }
         } catch (e: retrofit2.HttpException) {
             val errorBody = e.response()?.errorBody()?.string()
             Log.e(TAG, "❌ Server rejected sync (HTTP ${e.code()}): $errorBody")
