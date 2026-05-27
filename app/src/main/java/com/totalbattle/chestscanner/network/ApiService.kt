@@ -50,7 +50,7 @@ interface ApiService {
     suspend fun reportUnknownPlayer(@Body request: UnknownPlayerRequest)
 
     companion object {
-        private const val DEFAULT_URL = "https://elf-clan.vercel.app/"
+        private const val DEFAULT_URL = "http://localhost:3000/"
         private const val PREF_NAME = "ChestScannerPrefs"
         private const val KEY_BASE_URL = "api_base_url"
 
