@@ -1,17 +1,20 @@
 package com.totalbattle.chestscanner.network
 
 import android.content.Context
+import androidx.annotation.Keep
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 
+@Keep
 data class WhitelistResponse(
     val players: List<String>,
     val fixes: Map<String, String>
 )
 
+@Keep
 data class ChestRequest(
     val chestName: String,
     val fromPlayer: String,
@@ -21,10 +24,12 @@ data class ChestRequest(
     val originalTimer: String
 )
 
+@Keep
 data class UnknownPlayerRequest(
     val ocrName: String
 )
 
+@Keep
 data class SyncResponse(
     val success: Boolean,
     val count: Int

@@ -64,8 +64,8 @@ object SyncManager {
                 ErrorLogger.logError(TAG, "✅ API Request Successful. Uploaded ${events.size} chests.", null)
                 true
             } else {
-                Log.e(TAG, "❌ Server returned success=false during sync.")
-                ErrorLogger.logError(TAG, "Server returned success=false", null)
+                Log.e(TAG, "❌ Server returned success=false during sync. Response: $response")
+                ErrorLogger.logError(TAG, "Server returned success=false. Response: $response", null)
                 false
             }
         } catch (e: retrofit2.HttpException) {
