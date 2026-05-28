@@ -59,8 +59,10 @@ object SyncManager {
             val response = apiService.uploadChestsBatch(batchRequests)
             
             if (response.success) {
-                // Mark as synced instead of deleting
-                db.chestEventDao().markAsSynced(events.map { it.id })
+                // Mark as synced instead of deleting. Chunk to avoid SQLite 999 variables limit.
+                events.map { it.id }.chunked(900).forEach { chunk ->
+                    db.chestEventDao().markAsSynced(chunk)
+                }
 
                 // Automatic clean up: delete synced events older than 7 days
                 val cutoff = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
