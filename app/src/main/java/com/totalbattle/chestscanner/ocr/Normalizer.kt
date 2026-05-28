@@ -92,15 +92,21 @@ class Normalizer {
         if (matcher.find()) {
             val hours = matcher.group(1)?.toIntOrNull() ?: 0
             val minutes = matcher.group(2)?.toIntOrNull() ?: 0
-            val totalMinutesRemaining = hours * 60 + minutes
 
-            // In game: Chest lasts for exactly 24 hours (1440 minutes) when created.
-            // Creation Time = Current Time - (1440 - remaining minutes)
-            val elapsedMinutes = 1440 - totalMinutesRemaining
+            val tz = java.util.TimeZone.getTimeZone("GMT+10")
+            val now = Calendar.getInstance(tz)
+            val chestTime = Calendar.getInstance(tz).apply {
+                set(Calendar.HOUR_OF_DAY, hours)
+                set(Calendar.MINUTE, minutes)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
 
-            val cal = Calendar.getInstance()
-            cal.add(Calendar.MINUTE, -elapsedMinutes)
-            return cal.timeInMillis
+            if (chestTime.after(now)) {
+                chestTime.add(Calendar.DAY_OF_YEAR, -1)
+            }
+
+            return chestTime.timeInMillis
         }
 
         return System.currentTimeMillis() // Fallback to current time

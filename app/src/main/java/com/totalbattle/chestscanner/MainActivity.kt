@@ -33,6 +33,7 @@ import com.totalbattle.chestscanner.network.ApiService
 import com.totalbattle.chestscanner.network.ChestRequest
 import com.totalbattle.chestscanner.network.SyncManager
 import com.totalbattle.chestscanner.ocr.Normalizer
+import androidx.lifecycle.lifecycleScope
 import com.totalbattle.chestscanner.util.ErrorLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -86,8 +87,6 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun MainScreen() {
         val context = this
-        val scope = rememberCoroutineScope()
-        
         var apiBaseUrl by remember { mutableStateOf(ApiService.getBaseUrl(context)) }
         var isSyncing by remember { mutableStateOf(false) }
         var syncResult by remember { mutableStateOf<String?>(null) }
@@ -104,7 +103,7 @@ class MainActivity : ComponentActivity() {
 
         // Fetch stats locally
         fun refreshCacheStats() {
-            scope.launch(Dispatchers.IO) {
+            lifecycleScope.launch(Dispatchers.IO) {
                 val db = AppDatabase.getDatabase(context)
                 val events = db.chestEventDao().getUnsyncedEvents().size
                 withContext(Dispatchers.Main) {
@@ -118,7 +117,7 @@ class MainActivity : ComponentActivity() {
         }
 
         var selectedTabIndex by remember { mutableStateOf(0) }
-        val tabs = listOf("Overlay", "Dashboard", "Simulator", "Debug Logs")
+        val tabs = listOf("Overlay", "Session", "Sim", "Debug")
 
         Column(modifier = Modifier.fillMaxSize()) {
             TabRow(
@@ -130,7 +129,7 @@ class MainActivity : ComponentActivity() {
                     Tab(
                         selected = selectedTabIndex == index,
                         onClick = { selectedTabIndex = index },
-                        text = { Text(title, fontSize = 12.sp) }
+                        text = { Text(title, fontSize = 11.sp, maxLines = 1) }
                     )
                 }
             }
@@ -160,7 +159,7 @@ class MainActivity : ComponentActivity() {
                     isSyncing = isSyncing,
                     onSync = {
                         isSyncing = true
-                        scope.launch {
+                        lifecycleScope.launch {
                             try {
                                 ApiService.setBaseUrl(context, apiBaseUrl)
                                 val api = ApiService.create(context)
@@ -199,7 +198,6 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun SessionDashboardScreen() {
         val context = this
-        val scope = rememberCoroutineScope()
         val db = remember { AppDatabase.getDatabase(context) }
         val events by db.chestEventDao().getAllEvents().collectAsState(initial = emptyList())
         val scrollState = rememberScrollState()
@@ -228,23 +226,47 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 
-                Button(
-                    onClick = {
-                        scope.launch {
-                            try {
-                                val api = com.totalbattle.chestscanner.network.ApiService.create(context)
-                                com.totalbattle.chestscanner.network.SyncManager.syncEvents(context, api)
-                                android.widget.Toast.makeText(context, "Sync Triggered", android.widget.Toast.LENGTH_SHORT).show()
-                            } catch(e: Exception) {
-                                android.widget.Toast.makeText(context, "Sync Error", android.widget.Toast.LENGTH_SHORT).show()
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            lifecycleScope.launch {
+                                try {
+                                    val api = com.totalbattle.chestscanner.network.ApiService.create(context)
+                                    com.totalbattle.chestscanner.network.SyncManager.syncEvents(context, api)
+                                    android.widget.Toast.makeText(context, "Sync Triggered", android.widget.Toast.LENGTH_SHORT).show()
+                                } catch(e: Exception) {
+                                    android.widget.Toast.makeText(context, "Sync Error", android.widget.Toast.LENGTH_SHORT).show()
+                                }
                             }
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDFB239)),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    Text("Sync", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDFB239)),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text("Sync", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            lifecycleScope.launch(Dispatchers.IO) {
+                                try {
+                                    db.chestEventDao().deleteSyncedEvents()
+                                    withContext(Dispatchers.Main) {
+                                        android.widget.Toast.makeText(context, "Synced history cleared", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                } catch(e: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        android.widget.Toast.makeText(context, "Error clearing history", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f)),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text("Clear", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
 
@@ -324,7 +346,6 @@ class MainActivity : ComponentActivity() {
         onScanStatusChange: (String?) -> Unit
     ) {
         val context = androidx.compose.ui.platform.LocalContext.current
-        val scope = rememberCoroutineScope()
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -489,7 +510,7 @@ class MainActivity : ComponentActivity() {
 
                     Button(
                         onClick = {
-                            scope.launch {
+                            lifecycleScope.launch {
                                 try {
                                     onScanStatusChange("🔄 Normalizing OCR Fields...")
                                     ApiService.setBaseUrl(context, apiBaseUrl)
@@ -502,7 +523,9 @@ class MainActivity : ComponentActivity() {
                                     val normalizedSource = norm.normalizeSource(ocrTextSource)
                                     val claimTime = norm.parseTimer(ocrTextTimer)
                                     
-                                    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                                    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                                        timeZone = TimeZone.getTimeZone("GMT+10")
+                                    }
                                     val gameDay = "chests_${sdf.format(Date(claimTime))}"
                                     
                                     onScanStatusChange("📡 Normalization Complete:\n➔ Player: $normalizedPlayer\n➔ Source: $normalizedSource\n➔ Timer Time: ${Date(claimTime)}\n\nUploading to Next.js API...")

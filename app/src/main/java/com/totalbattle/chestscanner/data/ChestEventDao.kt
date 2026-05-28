@@ -17,4 +17,10 @@ interface ChestEventDao {
 
     @Query("UPDATE chest_events SET isSynced = 1 WHERE id IN (:ids)")
     suspend fun markAsSynced(ids: List<Int>)
+
+    @Query("DELETE FROM chest_events WHERE isSynced = 1")
+    suspend fun deleteSyncedEvents()
+
+    @Query("DELETE FROM chest_events WHERE isSynced = 1 AND timestamp < :olderThan")
+    suspend fun deleteOldSyncedEvents(olderThan: Long)
 }

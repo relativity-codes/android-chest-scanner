@@ -30,7 +30,9 @@ object SyncManager {
             val isoFormatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
             isoFormatter.timeZone = TimeZone.getTimeZone("UTC")
 
-            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("GMT+10")
+            }
             val norm = com.totalbattle.chestscanner.ocr.Normalizer()
 
             val batchRequests = events.map { event ->
@@ -60,6 +62,10 @@ object SyncManager {
                 // Mark as synced instead of deleting
                 db.chestEventDao().markAsSynced(events.map { it.id })
 
+                // Automatic clean up: delete synced events older than 7 days
+                val cutoff = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
+                db.chestEventDao().deleteOldSyncedEvents(cutoff)
+
                 Log.d(TAG, "✅ Synced ${events.size} events successfully!")
                 ErrorLogger.logError(TAG, "✅ API Request Successful. Uploaded ${events.size} chests.", null)
                 true
@@ -73,6 +79,8 @@ object SyncManager {
             Log.e(TAG, "❌ Server rejected sync (HTTP ${e.code()}): $errorBody")
             ErrorLogger.logError(TAG, "Server rejected sync (HTTP ${e.code()}): $errorBody", e)
             false
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "❌ Event sync failed.", e)
             ErrorLogger.logError(TAG, "Event sync failed", e)

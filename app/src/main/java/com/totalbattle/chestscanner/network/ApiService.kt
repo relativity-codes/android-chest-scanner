@@ -70,8 +70,15 @@ interface ApiService {
         }
 
         fun create(context: Context): ApiService {
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+
             return Retrofit.Builder()
                 .baseUrl(getBaseUrl(context))
+                .client(client)
                 .addConverterFactory(GsonConverterFactory.create())
                 .build()
                 .create(ApiService::class.java)

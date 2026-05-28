@@ -25,7 +25,8 @@ class ChestEventProcessor(
 
         val actualTime = calculateActualTimestamp(ocrResult.timerText)
         
-        val calendar = java.util.Calendar.getInstance().apply { timeInMillis = actualTime }
+        val tz = java.util.TimeZone.getTimeZone("GMT+10")
+        val calendar = java.util.Calendar.getInstance(tz).apply { timeInMillis = actualTime }
         val time = String.format("%02d:%02d", calendar.get(java.util.Calendar.HOUR_OF_DAY), calendar.get(java.util.Calendar.MINUTE))
         val gameDay = calculateGameDay(actualTime)
 
@@ -60,7 +61,8 @@ class ChestEventProcessor(
     }
 
     private fun calculateActualTimestamp(timerText: String): Long {
-        val now = Calendar.getInstance()
+        val tz = java.util.TimeZone.getTimeZone("GMT+10")
+        val now = Calendar.getInstance(tz)
         if (timerText.isEmpty()) return now.timeInMillis
 
         return try {
@@ -71,7 +73,7 @@ class ChestEventProcessor(
             val hours = match.groupValues[1].toInt()
             val minutes = match.groupValues[2].toInt()
 
-            val chestTime = Calendar.getInstance().apply {
+            val chestTime = Calendar.getInstance(tz).apply {
                 set(Calendar.HOUR_OF_DAY, hours)
                 set(Calendar.MINUTE, minutes)
                 set(Calendar.SECOND, 0)
@@ -91,7 +93,9 @@ class ChestEventProcessor(
     }
 
     private fun calculateGameDay(timestampMillis: Long): String {
-        val dayFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val dayFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+            timeZone = java.util.TimeZone.getTimeZone("GMT+10")
+        }
         return "chests_${dayFormatter.format(Date(timestampMillis))}"
     }
 }
