@@ -26,8 +26,12 @@ data class OcrResult(
 class OcrEngine {
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     
-    private val chestRegex = Regex("(?i)(.*?)Chest")
-    private val playerRegex = Regex("(?i)From:\\s*(.*)")
+    // Requires 2–30 letters/spaces before "Chest" as a whole word.
+    // Prevents matching lines like " Chest" (empty prefix) or symbol garbage.
+    private val chestRegex = Regex("(?i)([A-Za-z][A-Za-z\\s]{1,29})\\bChest\\b")
+    // Handles: "From: Kazimi", "From:Kazimi", "From : Kazimi"
+    private val playerRegex = Regex("(?i)From\\s*:\\s*([\\w\\s'-]{2,20})")
+    private val sourceRegex = Regex("(?i)S(?:ource|ource)?\\s*:\\s*(.+)")
     private val timerRegex = Regex("(?i)(\\d{1,2})h\\s*(\\d{1,2})m")
     
     // Tab Detection Regex
@@ -125,22 +129,24 @@ class OcrEngine {
                     continue
                 }
                 
-                // 3. Chest type check
+                // 3. Chest type check — only accept if a non-empty meaningful prefix was captured
                 val chestMatch = chestRegex.find(text)
                 if (chestMatch != null) {
-                    chestType = chestMatch.groupValues[1].trim() + " Chest"
+                    val prefix = chestMatch.groupValues[1].trim()
+                    if (prefix.isNotEmpty()) {
+                        chestType = "$prefix Chest"
+                    }
                     continue
                 }
                 
-                // 4. Source text candidate
-                // Check that it's not a tiny segment and not digit-only
-                if (text.length > 2 && !text.matches(Regex("\\d+"))) {
-                    if (sourceText.isEmpty()) {
-                        sourceText = text
-                    } else {
-                        sourceText += " $text"
-                    }
+                // 4. Source line check ("Source: Level 10 Crypt", "Source: Seasonal store", etc.)
+                val sourceMatch = sourceRegex.find(text)
+                if (sourceMatch != null) {
+                    sourceText = sourceMatch.groupValues[1].trim()
+                    continue
                 }
+
+                // 5. Other leftover lines — ignore to avoid noise contaminating sourceText
             }
         }
         
@@ -167,15 +173,19 @@ class OcrEngine {
     }
 
     private fun isValidChestName(name: String): Boolean {
-        if (name.length <= 3) return false
+        // Must be longer than just "Chest" alone — needs a meaningful type prefix
+        if (name.length <= 6) return false          // "X Chest" minimum is 7 chars
         if (!name.matches(Regex(".*[a-zA-Z].*"))) return false
+        // Confirm "Chest" is present and preceded by at least 2 non-space chars
+        val chestIdx = name.indexOf("Chest", ignoreCase = true)
+        if (chestIdx < 2) return false
         return true
     }
 
     private fun isValidPlayerName(name: String): Boolean {
-        if (name.isEmpty() || name.length > 20) return false
-        // Must not contain symbols only (must have at least one alphanumeric)
-        if (!name.matches(Regex(".*[a-zA-Z0-9].*"))) return false
+        if (name.length < 2 || name.length > 20) return false
+        // Must contain at least one letter (not symbols/digits only)
+        if (!name.matches(Regex(".*[a-zA-Z].*"))) return false
         return true
     }
 

@@ -73,28 +73,41 @@ class Normalizer {
 
     // Core Player Normalization Flow
     fun normalizePlayer(rawName: String): String {
-        val cleanedName = rawName.trim()
+        var cleanedName = rawName.trim()
         if (cleanedName.isEmpty()) return "UNKNOWN_PLAYER"
 
-        // Local whitelist cache removed as per Phase 5 patch:
-        // "The backend handles canonicalization. OCR errors must be resolved to the true canonical player."
-        // Just return the raw extracted name, next.js backend handles matching.
+        // Strip residual "From:" prefix in case the label leaked into the captured group
+        cleanedName = cleanedName.replace(Regex("(?i)^From\\s*:\\s*"), "").trim()
+
+        if (cleanedName.isEmpty() || cleanedName.length < 2) return "UNKNOWN_PLAYER"
+
+        // NOTE: intentionally NOT running cleanOcrSwaps() here — player names may
+        // legitimately contain digits (e.g. "K4zimi", "L0rd99") and the global
+        // digit→letter swaps would corrupt them. The backend whitelist handles fuzzy matching.
         return cleanedName
     }
 
-    // Timer parser logic: parses hours and minutes to compute creation time
+    // Timer parser logic: parses "19h 46m" → clock time in UTC+10.
+    // The game shows the time the chest was GIVEN (clock time), not a countdown.
+    // NOTE: deliberately does NOT call cleanOcrSwaps — that function replaces digits
+    // with letters ("1"→"i", "4"→"a", etc.) which would corrupt the hour/minute values.
     fun parseTimer(timerStr: String): Long {
-        val cleaned = cleanOcrSwaps(timerStr).lowercase(Locale.getDefault())
-        // Match standard timer like "18h 35m" or "18h35m"
-        val pattern = Pattern.compile("(\\d+)\\s*h(?:our)?s?\\s*(\\d+)\\s*m(?:in)?s?")
-        val matcher = pattern.matcher(cleaned)
+        val tz = java.util.TimeZone.getTimeZone("GMT+10")
+        val now = Calendar.getInstance(tz)
+
+        if (timerStr.isBlank()) return now.timeInMillis
+
+        // Match "19h 46m", "19h46m", "9h 5m" — same pattern as calculateActualTimestamp
+        val pattern = Pattern.compile("(\\d{1,2})\\s*h\\s*(\\d{1,2})\\s*m", Pattern.CASE_INSENSITIVE)
+        val matcher = pattern.matcher(timerStr.trim())
 
         if (matcher.find()) {
-            val hours = matcher.group(1)?.toIntOrNull() ?: 0
-            val minutes = matcher.group(2)?.toIntOrNull() ?: 0
+            val hours   = matcher.group(1)?.toIntOrNull() ?: return now.timeInMillis
+            val minutes = matcher.group(2)?.toIntOrNull() ?: return now.timeInMillis
 
-            val tz = java.util.TimeZone.getTimeZone("GMT+10")
-            val now = Calendar.getInstance(tz)
+            // Sanity check — game timers are 0h–23h 59m
+            if (hours > 23 || minutes > 59) return now.timeInMillis
+
             val chestTime = Calendar.getInstance(tz).apply {
                 set(Calendar.HOUR_OF_DAY, hours)
                 set(Calendar.MINUTE, minutes)
@@ -102,6 +115,8 @@ class Normalizer {
                 set(Calendar.MILLISECOND, 0)
             }
 
+            // If the resolved time is still in the future, the chest was sent yesterday
+            // (e.g. it's 01:00 now and the timer reads 23:50)
             if (chestTime.after(now)) {
                 chestTime.add(Calendar.DAY_OF_YEAR, -1)
             }
@@ -109,7 +124,7 @@ class Normalizer {
             return chestTime.timeInMillis
         }
 
-        return System.currentTimeMillis() // Fallback to current time
+        return now.timeInMillis // Fallback: use current time
     }
 
     private fun cleanSourceText(input: String): String {

@@ -42,7 +42,7 @@ object SyncManager {
                 val gameDay = "chests_${sdf.format(Date(claimTime))}"
                 val timeIso = isoFormatter.format(Date(claimTime))
                 
-                val normalizedChest = event.chestName.trim()
+                val normalizedChest = norm.cleanOcrSwaps(event.chestName.trim())
                 val normalizedPlayer = norm.normalizePlayer(event.fromPlayer)
                 val normalizedSource = norm.normalizeSource(event.source ?: "Overlay Auto-Scan")
 
