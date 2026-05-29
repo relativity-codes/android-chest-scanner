@@ -18,6 +18,7 @@ data class OcrResult(
     val chestType: String,
     val playerName: String,
     val timerText: String,
+    val sourceText: String,
     val boundingBox: Rect?,
     val confidence: Float
 )
@@ -43,16 +44,24 @@ class OcrEngine {
         
         val headerBitmap = Bitmap.createBitmap(bitmap, headerRect.left, headerRect.top, headerRect.width(), headerRect.height())
         val textBlocks = runMlKitOcr(headerBitmap)
-        headerBitmap.recycle()
 
         var hasGifts = false
         var hasTriumphal = false
 
         for (block in textBlocks) {
             val text = block.text
-            if (giftsTabRegex.containsMatchIn(text)) hasGifts = true
-            if (triumphalTabRegex.containsMatchIn(text)) hasTriumphal = true
+            val bbox = block.boundingBox
+            if (bbox != null) {
+                if (giftsTabRegex.containsMatchIn(text) && isRegionRed(headerBitmap, bbox)) {
+                    hasGifts = true
+                }
+                if (triumphalTabRegex.containsMatchIn(text) && isRegionRed(headerBitmap, bbox)) {
+                    hasTriumphal = true
+                }
+            }
         }
+        
+        headerBitmap.recycle()
 
         return when {
             hasTriumphal -> "Triumphal Gifts"
@@ -81,14 +90,12 @@ class OcrEngine {
         var chestType = ""
         var playerName = ""
         var timerText = ""
+        var sourceText = ""
         var rawTextCombined = ""
         var boundingBox: Rect? = null
-        var totalConfidence = 1.0f // ML Kit doesn't provide confidence via standard text blocks, defaulting for contract
+        val totalConfidence = 1.0f // ML Kit doesn't provide confidence via standard text blocks, defaulting for contract
         
         for (block in textBlocks) {
-            val text = block.text
-            rawTextCombined += "$text "
-            
             // If boundingBox missing -> discard
             if (block.boundingBox != null) {
                 if (boundingBox == null) {
@@ -98,19 +105,42 @@ class OcrEngine {
                 }
             }
             
-            val chestMatch = chestRegex.find(text)
-            if (chestMatch != null) {
-                chestType = chestMatch.groupValues[1].trim() + " Chest"
-            }
-            
-            val playerMatch = playerRegex.find(text)
-            if (playerMatch != null) {
-                playerName = playerMatch.groupValues[1].trim()
-            }
-
-            val timerMatch = timerRegex.find(text)
-            if (timerMatch != null) {
-                timerText = timerMatch.groupValues[0].trim()
+            for (line in block.lines) {
+                val text = line.text.trim()
+                if (text.isEmpty()) continue
+                
+                rawTextCombined += "$text "
+                
+                // 1. Timer check
+                val timerMatch = timerRegex.find(text)
+                if (timerMatch != null) {
+                    timerText = timerMatch.groupValues[0].trim()
+                    continue
+                }
+                
+                // 2. Player name check
+                val playerMatch = playerRegex.find(text)
+                if (playerMatch != null) {
+                    playerName = playerMatch.groupValues[1].trim()
+                    continue
+                }
+                
+                // 3. Chest type check
+                val chestMatch = chestRegex.find(text)
+                if (chestMatch != null) {
+                    chestType = chestMatch.groupValues[1].trim() + " Chest"
+                    continue
+                }
+                
+                // 4. Source text candidate
+                // Check that it's not a tiny segment and not digit-only
+                if (text.length > 2 && !text.matches(Regex("\\d+"))) {
+                    if (sourceText.isEmpty()) {
+                        sourceText = text
+                    } else {
+                        sourceText += " $text"
+                    }
+                }
             }
         }
         
@@ -118,7 +148,7 @@ class OcrEngine {
 
         // Missing Bounding Box check
         if (boundingBox == null) {
-            return OcrResult(false, rawTextCombined, chestType, playerName, timerText, null, 0.0f)
+            return OcrResult(false, rawTextCombined, chestType, playerName, timerText, sourceText, null, 0.0f)
         }
 
         // Stage 4: Strict validation & Sanity Filter
@@ -130,6 +160,7 @@ class OcrEngine {
             chestType = chestType,
             playerName = playerName,
             timerText = timerText,
+            sourceText = sourceText.trim(),
             boundingBox = boundingBox,
             confidence = totalConfidence // Mock confidence since ML Kit Latin base doesn't expose it
         )
@@ -146,6 +177,38 @@ class OcrEngine {
         // Must not contain symbols only (must have at least one alphanumeric)
         if (!name.matches(Regex(".*[a-zA-Z0-9].*"))) return false
         return true
+    }
+
+    private fun isRegionRed(bitmap: Bitmap, rect: Rect): Boolean {
+        val left = rect.left.coerceIn(0, bitmap.width - 1)
+        val top = rect.top.coerceIn(0, bitmap.height - 1)
+        val right = rect.right.coerceIn(0, bitmap.width)
+        val bottom = rect.bottom.coerceIn(0, bitmap.height)
+        val width = right - left
+        val height = bottom - top
+        if (width <= 0 || height <= 0) return false
+
+        var redPixelCount = 0
+        var totalPixels = 0
+
+        for (x in 0 until width step 2) {
+            for (y in 0 until height step 2) {
+                val pixel = bitmap.getPixel(left + x, top + y)
+                val r = (pixel shr 16) and 0xFF
+                val g = (pixel shr 8) and 0xFF
+                val b = pixel and 0xFF
+
+                // Red criteria: R is high, G and B are low, and R is significantly greater than G and B
+                if (r > 120 && r > g * 1.5 && r > b * 1.5) {
+                    redPixelCount++
+                }
+                totalPixels++
+            }
+        }
+
+        if (totalPixels == 0) return false
+        val redRatio = redPixelCount.toFloat() / totalPixels
+        return redRatio > 0.06f // Threshold for text outline/strokes
     }
 
     private fun preprocessImage(src: Bitmap): Bitmap {

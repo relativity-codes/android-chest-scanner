@@ -109,7 +109,8 @@ class ScannerService : Service() {
                                 try {
                                     val ocrResult = ocrEngine.process(row.bitmap, row.normalizedY)
                                     if (ocrResult != null && ocrResult.isValid) {
-                                        eventProcessor.process(ocrResult, row.normalizedY, frameIndex, currentTab)
+                                        val source = if (ocrResult.sourceText.isNotEmpty()) ocrResult.sourceText else currentTab
+                                        eventProcessor.process(ocrResult, row.normalizedY, source)
                                     }
                                 } catch (e: Throwable) {
                                     ErrorLogger.logError(TAG, "Row processing error", e)

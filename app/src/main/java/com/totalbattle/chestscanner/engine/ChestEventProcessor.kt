@@ -18,7 +18,7 @@ class ChestEventProcessor(
     private val onUniqueChest: (OcrResult) -> Unit
 ) {
     
-    fun process(ocrResult: OcrResult, normalizedY: Float, frameIndex: Long, currentTab: String) {
+    fun process(ocrResult: OcrResult, normalizedY: Float, rawSource: String) {
         // System Principle Guarantee: Prioritize correctness over completeness
         // If uncertain (invalid), do NOT log event, do NOT retry aggressively, do NOT infer missing data.
         if (!ocrResult.isValid || ocrResult.boundingBox == null) return
@@ -33,23 +33,21 @@ class ChestEventProcessor(
         val isDuplicate = deduplicationEngine.isDuplicate(
             chestName = ocrResult.chestType,
             fromPlayer = ocrResult.playerName,
-            source = currentTab,
+            source = rawSource,
             time = time,
             gameDay = gameDay,
             normalizedY = normalizedY
         )
         
         if (!isDuplicate) {
-            // Event Ordering Guarantee
-            val eventSequenceId = "${frameIndex}_${normalizedY}"
-            Log.i("EventProcessor", "Unique Chest Detected: ${ocrResult.chestType} from ${ocrResult.playerName} (Tab: $currentTab)")
+            Log.i("EventProcessor", "Unique Chest Detected: ${ocrResult.chestType} from ${ocrResult.playerName} (Source: $rawSource)")
             
             scope.launch {
                 dao.insert(
                     ChestEventEntity(
                         chestName = ocrResult.chestType,
                         fromPlayer = ocrResult.playerName,
-                        source = currentTab,
+                        source = rawSource,
                         originalTimer = ocrResult.timerText,
                         actualTimestamp = actualTime
                     )

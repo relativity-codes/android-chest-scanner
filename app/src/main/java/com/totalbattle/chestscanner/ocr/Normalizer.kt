@@ -112,34 +112,65 @@ class Normalizer {
         return System.currentTimeMillis() // Fallback to current time
     }
 
-    // Normalizes source strings using python script patterns
-    fun normalizeSource(rawSource: String): String {
-        val text = rawSource.trim()
-        
-        // Manual OCR fixes from python ocr_fixes table
+    private fun cleanSourceText(input: String): String {
+        var text = input.trim()
+        if (text.isEmpty()) return text
+
+        // 1. Strip "Source:" prefix (case-insensitive) using regex
+        val sourcePrefixRegex = Regex("(?i)^s[a-z]{3,5}e?\\s*:\\s*")
+        val match = sourcePrefixRegex.find(text)
+        if (match != null) {
+            text = text.substring(match.range.last + 1).trim()
+        }
+
+        // 2. Fix common OCR typos in the word "Level" (like "Leve1", "Leve|", "Lvl", "lvl")
+        text = text.replace(Regex("(?i)Leve[1|liI]"), "Level")
+                   .replace(Regex("(?i)\\blvl\\b"), "Level")
+
+        // 3. Fix manual OCR words
         val ocrFixes = mapOf(
             "Spofls" to "Spoils",
             "Herofc" to "Heroic",
             "Trfumph" to "Triumph",
             "Captatn" to "Captain"
         )
-        
         for ((wrong, correct) in ocrFixes) {
-            if (text.contains(wrong, ignoreCase = true)) {
-                return correct
-            }
+            text = text.replace(wrong, correct, ignoreCase = true)
         }
 
-        val cleaned = text.lowercase()
+        // 4. Title case the words, keeping digits as is
+        return text.split(" ").joinToString(" ") { word ->
+            if (word.lowercase() in listOf("of", "the")) {
+                word.lowercase()
+            } else {
+                word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+            }
+        }
+    }
+
+    // Normalizes source strings using python script patterns
+    fun normalizeSource(rawSource: String): String {
+        val text = rawSource.trim()
+        if (text.isEmpty()) return "Unknown"
+        
+        val cleaned = cleanSourceText(text)
+        val cleanedLower = cleaned.lowercase(Locale.getDefault())
+
         return when {
-            cleaned.contains("crypt") -> "Crypt"
-            cleaned.contains("monst") || cleaned.contains("troll") -> "Monster"
-            cleaned.contains("chest") -> "Chest"
-            cleaned.contains("clan") -> "Clan"
-            cleaned.contains("pvp") || cleaned.contains("player") -> "PvP"
-            cleaned.contains("arena") -> "Arena"
-            cleaned.contains("tower") -> "Tower"
-            else -> text
+            cleanedLower.contains("triumph") -> "Triumphal Gifts"
+            cleanedLower.contains("gifts") -> "Gifts"
+            cleanedLower.contains("clan") -> "Clan"
+            cleanedLower.contains("pvp") || cleanedLower.contains("player") -> "PvP"
+            cleanedLower.contains("arena") -> "Arena"
+            cleanedLower.contains("tower") -> "Tower"
+            cleanedLower.contains("captain") -> "Captain"
+            // For crypts, monsters, spoils, etc., keep the full text details
+            cleanedLower.contains("crypt") || cleanedLower.contains("troll") || 
+            cleanedLower.contains("monst") || cleanedLower.contains("sphinx") || 
+            cleanedLower.contains("gorgon") || cleanedLower.contains("beholder") || 
+            cleanedLower.contains("dragon") || cleanedLower.contains("giant") || 
+            cleanedLower.contains("beast") || cleanedLower.contains("spoils") -> cleaned
+            else -> "Unknown"
         }
     }
 }
